@@ -10,6 +10,12 @@ from xmodule.modulestore.tests.factories import CourseFactory, ItemFactory
 from django.core.management import call_command, CommandError
 from edxval.api import get_videos_for_course
 from xmodule.video_module.transcripts_utils import download_youtube_subs, save_to_store
+from datetime import datetime
+
+import pytz
+from edxval import api as api
+
+
 
 
 SRT_FILEDATA = '''
@@ -31,6 +37,14 @@ Dobar dan!
 00:00:02,720 --> 00:00:05,430
 Kako ste danas?
 '''
+
+
+VIDEO_DICT_STAR = dict(
+    client_video_id="TWINKLE TWINKLE",
+    duration=42.0,
+    edx_video_id="test_edx_video_id",
+    status="upload",
+)
 
 
 class TestArgParsing(TestCase):
@@ -82,47 +96,60 @@ class MigrateTranscripts(ModuleStoreTestCase):
             data={'data': video_sample_xml}
         )
 
+        self.video_descriptor.edx_video_id = 'test_edx_video_id'
+
         save_to_store(SRT_FILEDATA, "subs_grmtran1.srt", 'text/srt', self.video_descriptor.location)
         save_to_store(CRO_SRT_FILEDATA, "subs_croatian1.srt", 'text/srt', self.video_descriptor.location)
 
+        created = datetime.now(pytz.utc)
+        video = {
+            "edx_video_id": "test_edx_video_id",
+            "client_video_id": "test1.mp4",
+            "duration": 42.0,
+            "status": "upload",
+            "courses": [unicode(self.course.id)],
+            "encoded_videos": [],
+            "created": created
+        }
 
-    def test_migrate_transcripts(self):
+        api.create_video(video)
+
+
+    def test_migrated_transcripts_count(self):
+
+        # check that transcript does not exist
+
+        languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
+
+        self.assertEqual(len(languages), 0)
+
+        # now call migrate_transcripts command and check the transcript integrity
+
+        call_command('migrate_transcripts', '--all-courses', '--force-update')
+
+        languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
+        self.assertItemsEqual(languages, ['ge', 'hr'])
+#        self.assertEqual(len(languages), 2)
+
+
+
+    def test_migrates_transcripts_integrity(self):
         """
         Test migrating transcripts
         """
 
-        videos = list(get_videos_for_course(self.course.id))
-        self.assertEqual(1, len(videos))
-
-        self.assertEqual(self.video_descriptor.index_dictionary(), {
-            "content": {
-                "display_name": "Test Video",
-                "transcript_ge": "sprechen sie deutsch? Ja, ich spreche Deutsch",
-                "transcript_hr": "Dobar dan! Kako ste danas?"
-            },
-            "content_type": "Video"
-        })
-
         translations = self.video_descriptor.available_translations(self.video_descriptor.get_transcripts_info())
-        self.assertEqual(translations, ['hr', 'ge'])
-
+        self.assertItemsEqual(translations, ['hr', 'ge'])
 
         # now call migrate_transcripts command and check the transcript integrity
 
-        call_command('migrate_transcripts', 'cms', self.course.id)
+        call_command('migrate_transcripts', '--all-courses', '--force-update')
 
-        videos = list(get_videos_for_course(self.course.id))
-        self.assertEqual(1, len(videos))
+        languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
 
-        self.assertEqual(self.video_descriptor.index_dictionary(), {
-            "content": {
-                "display_name": "Test Video",
-                "transcript_ge": "sprechen sie deutsch? Ja, ich spreche Deutsch",
-                "transcript_hr": "Dobar dan! Kako ste danas?"
-            },
-            "content_type": "Video"
-        })
+        self.assertItemsEqual(languages, ['hr', 'ge'])
 
-        translations = self.video_descriptor.available_translations(self.video_descriptor.get_transcripts_info())
-        self.assertEqual(translations, ['hr', 'ge'])
+        self.assertEqual(api.get_video_transcript_content('hr', self.video_descriptor.edx_video_id), CRO_SRT_FILEDATA)
+        self.assertEqual(api.get_video_transcript_content('ge', self.video_descriptor.edx_video_id), SRT_FILEDATA)
+
 
