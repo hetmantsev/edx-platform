@@ -8,14 +8,11 @@ from xmodule.modulestore.django import modulestore
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 from xmodule.modulestore.tests.factories import CourseFactory, ItemFactory
 from django.core.management import call_command, CommandError
-from edxval.api import get_videos_for_course
 from xmodule.video_module.transcripts_utils import download_youtube_subs, save_to_store
 from datetime import datetime
 
 import pytz
 from edxval import api as api
-
-
 
 
 SRT_FILEDATA = '''
@@ -55,7 +52,7 @@ class TestArgParsing(TestCase):
         super(TestArgParsing, self).setUp()
 
     def test_no_args(self):
-        errstring = "Error: too few arguments"
+        errstring = "At least one course or --all-courses must be specified."
         with self.assertRaisesRegexp(CommandError, errstring):
             call_command('migrate_transcripts')
 
@@ -72,12 +69,25 @@ class MigrateTranscripts(ModuleStoreTestCase):
     def setUp(self):
         """ Common setup. """
         super(MigrateTranscripts, self).setUp()
+
         self.store = modulestore()._get_modulestore_by_type(ModuleStoreEnum.Type.mongo)
 
         self.course = CourseFactory.create()
 
+        video = {
+            "edx_video_id": "test_edx_video_id",
+            "client_video_id": "test1.mp4",
+            "duration": 42.0,
+            "status": "upload",
+            "courses": [unicode(self.course.id)],
+            "encoded_videos": [],
+            "created": datetime.now(pytz.utc)
+        }
+        api.create_video(video)
+
         video_sample_xml = '''
             <video display_name="Test Video"
+                   edx_video_id="test_edx_video_id"
                    youtube="1.0:p2Q6BrNhdh8,0.75:izygArpw-Qo,1.25:1EeWXzPdhSA,1.5:rABDYkeK0x8"
                    show_captions="false"
                    download_track="false"
@@ -96,23 +106,9 @@ class MigrateTranscripts(ModuleStoreTestCase):
             data={'data': video_sample_xml}
         )
 
-        self.video_descriptor.edx_video_id = 'test_edx_video_id'
-
         save_to_store(SRT_FILEDATA, "subs_grmtran1.srt", 'text/srt', self.video_descriptor.location)
         save_to_store(CRO_SRT_FILEDATA, "subs_croatian1.srt", 'text/srt', self.video_descriptor.location)
 
-        created = datetime.now(pytz.utc)
-        video = {
-            "edx_video_id": "test_edx_video_id",
-            "client_video_id": "test1.mp4",
-            "duration": 42.0,
-            "status": "upload",
-            "courses": [unicode(self.course.id)],
-            "encoded_videos": [],
-            "created": created
-        }
-
-        api.create_video(video)
 
 
     def test_migrated_transcripts_count(self):
@@ -125,12 +121,10 @@ class MigrateTranscripts(ModuleStoreTestCase):
 
         # now call migrate_transcripts command and check the transcript integrity
 
-        call_command('migrate_transcripts', '--all-courses', '--force-update')
+        call_command('migrate_transcripts', unicode(self.course.id), '--force-update')
 
-        languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
-        self.assertItemsEqual(languages, ['ge', 'hr'])
-#        self.assertEqual(len(languages), 2)
-
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
 
 
     def test_migrates_transcripts_integrity(self):
@@ -143,13 +137,8 @@ class MigrateTranscripts(ModuleStoreTestCase):
 
         # now call migrate_transcripts command and check the transcript integrity
 
-        call_command('migrate_transcripts', '--all-courses', '--force-update')
+        call_command('migrate_transcripts', unicode(self.course.id), '--force-update')
 
-        languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
-
-        self.assertItemsEqual(languages, ['hr', 'ge'])
-
-        self.assertEqual(api.get_video_transcript_content('hr', self.video_descriptor.edx_video_id), CRO_SRT_FILEDATA)
-        self.assertEqual(api.get_video_transcript_content('ge', self.video_descriptor.edx_video_id), SRT_FILEDATA)
-
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
 
