@@ -53,11 +53,17 @@ from xmodule.video_module.transcripts_utils import Transcript
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.exceptions import NotFoundError
 
-from edxval.api import create_video_transcript, is_transcript_available, create_or_update_video_transcript
+from edxval.api import create_video_transcript,\
+    is_transcript_available,\
+    create_or_update_video_transcript,\
+    create_external_video
 from django.core.files.base import ContentFile
 from collections import defaultdict
 
 import mimetypes
+
+from django.contrib.auth import get_user_model
+User = get_user_model()
 
 LOGGER = get_task_logger(__name__)
 FILE_READ_CHUNK = 1024  # bytes
@@ -141,11 +147,28 @@ def get_videos_from_store(course_key):
 def migrate_transcript(video, language_code, transcript_name, force_update=False):
     try:
         transcript_content = Transcript.asset(video.location, transcript_name, language_code)
-        push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+        if video.edx_video_id:
+            push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+        else:
+            edx_video_id = create_external_video('external-video')
+            LOGGER.info("Created1 edx_video_id= %s", edx_video_id)
+            if edx_video_id:
+                video.edx_video_id = edx_video_id
+                video.save_with_metadata(user=User.objects.get(username='staff'))
+                push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+
     except NotFoundError:
         try:
             transcript_content = Transcript.asset(video.location, None, None, transcript_name)
-            push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+            if video.edx_video_id:
+                push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+            else:
+                edx_video_id = create_external_video('external-video')
+                LOGGER.info("Created2 edx_video_id= %s", edx_video_id)
+                if edx_video_id:
+                    video.edx_video_id = edx_video_id
+                    video.save_with_metadata(user=User.objects.get(username='staff'))
+                    push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
         except NotFoundError:
             LOGGER.error("Could not locate asset for %s language named %s of video %s ",
                          language_code, transcript_name, video.location)
@@ -161,17 +184,19 @@ def push_to_s3(edx_video_id, language_code, transcript_content, force_update=Fal
                 break
         if force_update:
             transcript_url = create_or_update_video_transcript(
-                edx_video_id, language_code,
+                edx_video_id,
+                language_code,
                 dict({'file_format': file_format}),
-                ContentFile(transcript_content),
+                ContentFile(transcript_content)
             )
             LOGGER.info("Push_to_S3 %s for %s", True if transcript_url else False, edx_video_id)
         else:
             created = create_video_transcript(
-                                                edx_video_id, language_code,
-                                                ContentFile(transcript_content),
-                                                metadata={'file_format': file_format},
-                                                )
+                edx_video_id,
+                language_code,
+                file_format,
+                ContentFile(transcript_content)
+                )
             LOGGER.info("Push_to_S3 %s for %s", created, edx_video_id)
 
 
