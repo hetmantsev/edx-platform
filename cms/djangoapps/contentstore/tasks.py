@@ -49,7 +49,7 @@ from xmodule.modulestore.xml_exporter import export_course_to_xml, export_librar
 from xmodule.modulestore.xml_importer import import_course_from_xml, import_library_from_xml
 
 from celery_utils.persist_on_failure import PersistOnFailureTask
-from xmodule.video_module.transcripts_utils import Transcript
+from xmodule.video_module.transcripts_utils import Transcript, clean_video_id
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.exceptions import NotFoundError
 
@@ -58,9 +58,8 @@ from edxval.api import create_video_transcript,\
     create_or_update_video_transcript,\
     create_external_video
 from django.core.files.base import ContentFile
-from collections import defaultdict
+from pysrt import SubRipFile
 
-import mimetypes
 
 from django.contrib.auth import get_user_model
 User = get_user_model()
@@ -107,27 +106,48 @@ def async_migrate_transcript(*args, **kwargs):
     course_key = next(iter(args), None)
     force_update = kwargs['force_update']
     file_format = None
-    LOGGER.info("Locating videos for Course %s ... ", course_key)
+    import logging;
+    logging.getLogger(__name__).setLevel(logging.ERROR)
+    LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    LOGGER.info("Processing Course %s Start", course_key)
+    LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     all_videos = get_videos_from_store(course_key)
 
     for video in all_videos:
         other_lang_transcripts = video.transcripts
         english_transcript = video.sub
+        LOGGER.info("****************************************************************")
+        LOGGER.info("Start Processing video %s", video.location)
+        LOGGER.info("****************************************************************")
 
         if english_transcript:
+            LOGGER.info("Found video.sub: %s ... ", english_transcript)
             transcript_already_present = is_transcript_available(video.edx_video_id, 'en')
+            LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
             if transcript_already_present and force_update:
                migrate_transcript(video, 'en', video.sub, True)
             elif not transcript_already_present:
                migrate_transcript(video, 'en', video.sub)
+        else:
+            LOGGER.info("video.sub is empty")
 
         if any(other_lang_transcripts):
             for lang, name in other_lang_transcripts.items():
                 transcript_already_present = is_transcript_available(video.edx_video_id, lang)
+                LOGGER.info("Already pushed other transcript of language %s found: %s ... ",
+                            lang,
+                            transcript_already_present
+                            )
                 if transcript_already_present and force_update:
                     migrate_transcript(video, lang, name, True)
                 elif not transcript_already_present:
                     migrate_transcript(video, lang, name)
+
+        LOGGER.info("*************************End Processing video *************************")
+
+    LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    LOGGER.info("!!!!!!!!!!!!!!!!!!!!!End Processing Course!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
 def get_videos_from_store(course_key):
     store = modulestore()
@@ -143,28 +163,43 @@ def get_videos_from_store(course_key):
     return all_videos
 
 
+def is_transcript_content_srt(transcript_content):
+    try:
+        srt_subs_obj = SubRipFile.from_string(transcript_content.data.decode('utf-8-sig'))
+        if len(srt_subs_obj) > 0:
+            LOGGER.info("SRT file format detected")
+        return True
+    except Exception as ex:
+        LOGGER.info("SRT file format could not be detected")
+        return False
+
+
 
 def migrate_transcript(video, language_code, transcript_name, force_update=False):
+    LOGGER.info("----------------------------------------------------------------------")
+    LOGGER.info("Start migrating %s transcript", language_code)
+    LOGGER.info("----------------------------------------------------------------------")
     try:
         transcript_content = Transcript.asset(video.location, transcript_name, language_code)
         if video.edx_video_id:
+            LOGGER.info("Found edx_video_id= %s via first fetch asset method", video.edx_video_id)
             push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
         else:
             edx_video_id = create_external_video('external-video')
-            LOGGER.info("Created1 edx_video_id= %s", edx_video_id)
+            LOGGER.info("Created edx_video_id= %s in first fetch asset flow", edx_video_id)
             if edx_video_id:
                 video.edx_video_id = edx_video_id
                 video.save_with_metadata(user=User.objects.get(username='staff'))
                 push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
-
     except NotFoundError:
         try:
             transcript_content = Transcript.asset(video.location, None, None, transcript_name)
             if video.edx_video_id:
+                LOGGER.info("Found edx_video_id= %s via second fetch asset method", video.edx_video_id)
                 push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
             else:
                 edx_video_id = create_external_video('external-video')
-                LOGGER.info("Created2 edx_video_id= %s", edx_video_id)
+                LOGGER.info("Created edx_video_id= %s in second fetch asset flow", edx_video_id)
                 if edx_video_id:
                     video.edx_video_id = edx_video_id
                     video.save_with_metadata(user=User.objects.get(username='staff'))
@@ -173,6 +208,7 @@ def migrate_transcript(video, language_code, transcript_name, force_update=False
             LOGGER.error("Could not locate asset for %s language named %s of video %s ",
                          language_code, transcript_name, video.location)
 
+    LOGGER.info("--------------------------End migrating transcript------------------------------")
 
 def push_to_s3(edx_video_id, language_code, transcript_content, force_update=False):
     try:
@@ -182,26 +218,35 @@ def push_to_s3(edx_video_id, language_code, transcript_content, force_update=Fal
             if transcript_content.content_type in type:
                 file_format = key
                 break
-        if force_update:
-            transcript_url = create_or_update_video_transcript(
-                edx_video_id,
-                language_code,
-                dict({'file_format': file_format}),
-                ContentFile(transcript_content)
-            )
-            LOGGER.info("Push_to_S3 %s for %s", True if transcript_url else False, edx_video_id)
-        else:
-            created = create_video_transcript(
-                edx_video_id,
-                language_code,
-                file_format,
-                ContentFile(transcript_content)
-                )
-            LOGGER.info("Push_to_S3 %s for %s", created, edx_video_id)
 
+        if file_format is None and is_transcript_content_srt(transcript_content):
+            file_format = Transcript.SRT
+
+        LOGGER.info("Content is %s!!!", transcript_content.content_type)
+        LOGGER.info("File Format is %s!!!", file_format)
+        edx_video_id = clean_video_id(edx_video_id)
+        if file_format is not None:
+            if force_update:
+                transcript_url = create_or_update_video_transcript(
+                    edx_video_id,
+                    language_code,
+                    dict({'file_format': file_format}),
+                    ContentFile(transcript_content)
+                )
+                LOGGER.info("Push_to_S3 %s for %s with create_or_update method", True if transcript_url else False, edx_video_id)
+            else:
+                created = create_video_transcript(
+                    edx_video_id,
+                    language_code,
+                    file_format,
+                    ContentFile(transcript_content)
+                    )
+                LOGGER.info("Push_to_S3 %s for %s with create method", created, edx_video_id)
+        else:
+            raise NotImplementedError("Cannot determine transcript file format")
 
     except Exception as err:
-        LOGGER.info("Push_failed %s", err.message)
+        LOGGER.error("Push_failed: %s", err.message)
 
 
 
