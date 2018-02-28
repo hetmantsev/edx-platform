@@ -1,8 +1,10 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 
-import SearchContainer from '../Search/SearchContainer';
 import { StatusAlert } from '@edx/paragon';
+import SearchContainer from '../Search/SearchContainer';
+import EntitlementTable from '../Table/Table';
+
 
 const Main = (props) => (
   <div>
@@ -16,6 +18,11 @@ const Main = (props) => (
       Entitlement Support Page
     </h2>
     <SearchContainer/>
+    <EntitlementTable 
+      entitlements={ props.entitlements }
+      openReissueModal={ props.openReissueModal }
+      ecommerceUrl={ props.ecommerceUrl } 
+    />
   </div>
 );
 
