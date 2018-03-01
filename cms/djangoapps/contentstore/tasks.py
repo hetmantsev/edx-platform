@@ -53,6 +53,11 @@ from xmodule.video_module.transcripts_utils import Transcript, clean_video_id
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.exceptions import NotFoundError
 
+from celery.result import AsyncResult
+from celery.states import FAILURE, READY_STATES, REVOKED, SUCCESS
+
+
+
 from edxval.api import create_video_transcript,\
     is_transcript_available,\
     create_or_update_video_transcript,\
@@ -94,11 +99,13 @@ def enqueue_async_migrate_transcripts_tasks(
 
     for course_key in course_keys:
         options = _task_options(routing_key)
-        async_migrate_transcript.apply_async(
-            args=[unicode(course_key)],
-            kwargs={'force_update': force_update},
-            **options
-        )
+        try:
+            async_migrate_transcript.apply_async(
+                args=[unicode(course_key)],
+                kwargs={'force_update': force_update},
+                **options)
+        except async_migrate_transcript.OperationalError as exc:
+            LOGGER.exception('Task raised: %r', exc)
 
 
 @task(base=PersistOnFailureTask)
@@ -106,8 +113,11 @@ def async_migrate_transcript(*args, **kwargs):
     course_key = next(iter(args), None)
     force_update = kwargs['force_update']
     file_format = None
+    sub_tasks=[]
+
     import logging;
     logging.getLogger(__name__).setLevel(logging.ERROR)
+
     LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     LOGGER.info("Processing Course %s Start", course_key)
     LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
@@ -119,32 +129,46 @@ def async_migrate_transcript(*args, **kwargs):
         LOGGER.info("****************************************************************")
         LOGGER.info("Start Processing video %s", video.location)
         LOGGER.info("****************************************************************")
-
-        if english_transcript:
-            LOGGER.info("Found video.sub: %s ... ", english_transcript)
-            transcript_already_present = is_transcript_available(video.edx_video_id, 'en')
-            LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
-            if transcript_already_present and force_update:
-               migrate_transcript(video, 'en', video.sub, True)
-            elif not transcript_already_present:
-               migrate_transcript(video, 'en', video.sub)
-        else:
-            LOGGER.info("video.sub is empty")
-
-        if any(other_lang_transcripts):
-            for lang, name in other_lang_transcripts.items():
-                transcript_already_present = is_transcript_available(video.edx_video_id, lang)
-                LOGGER.info("Already pushed other transcript of language %s found: %s ... ",
-                            lang,
-                            transcript_already_present
-                            )
+        try:
+            if english_transcript:
+                LOGGER.info("Found video.sub: %s ... ", english_transcript)
+                transcript_already_present = is_transcript_available(video.edx_video_id, 'en')
+                LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
                 if transcript_already_present and force_update:
-                    migrate_transcript(video, lang, name, True)
+                   result = async_migrate_transcript_subtask.apply_async(args=[video, 'en', video.sub, True], kwargs=kwargs,
+                                                                link_error=error_handler.s())
+                   sub_tasks.append(result.id)
                 elif not transcript_already_present:
-                    migrate_transcript(video, lang, name)
+                   result = async_migrate_transcript_subtask.apply_async(args=[video, 'en', video.sub, False], kwargs=kwargs,
+                                                                link_error=error_handler.s())
+                   sub_tasks.append(result.id)
+            else:
+                LOGGER.info("video.sub is empty")
+
+            if any(other_lang_transcripts):
+                for lang, name in other_lang_transcripts.items():
+                    transcript_already_present = is_transcript_available(video.edx_video_id, lang)
+                    LOGGER.info("Already pushed other transcript of language %s found: %s ... ",
+                                lang,
+                                transcript_already_present
+                                )
+                    if transcript_already_present and force_update:
+                        result = async_migrate_transcript_subtask.apply_async(args=[video, lang, name, True], kwargs=kwargs,
+                                                                     link_error=error_handler.s())
+                        sub_tasks.append(result.id)
+                    elif not transcript_already_present:
+                        result = async_migrate_transcript_subtask.apply_async(args=[video, lang, name, False], kwargs=kwargs,
+                                                                     link_error=error_handler.s())
+                        sub_tasks.append(result.id)
+
+        except async_migrate_transcript.OperationalError as exc:
+            LOGGER.exception('Task raised: %r', exc)
 
         LOGGER.info("*************************End Processing video *************************")
 
+#    for id in sub_tasks:
+#        res = AsyncResult(id)
+#        print res.state
     LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     LOGGER.info("!!!!!!!!!!!!!!!!!!!!!End Processing Course!!!!!!!!!!!!!!!!!!!!!!!!!!")
     LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
@@ -174,8 +198,23 @@ def is_transcript_content_srt(transcript_content):
         return False
 
 
+@task(bind=True)
+def error_handler(uuid):
+    import pdb;pdb.set_trace()
+    result = AsyncResult(uuid)
+    exc = result.get(propagate=False)
+    print('Task {0} raised exception: {1!r}\n{2!r}'.format(
+          uuid, exc, result.traceback))
 
-def migrate_transcript(video, language_code, transcript_name, force_update=False):
+
+@task(base=PersistOnFailureTask)
+def async_migrate_transcript_subtask(*args, **kwargs):
+
+    video = args[0]
+    language_code = args[1]
+    transcript_name = args[2]
+    force_update = args[3]
+
     LOGGER.info("----------------------------------------------------------------------")
     LOGGER.info("Start migrating %s transcript", language_code)
     LOGGER.info("----------------------------------------------------------------------")
