@@ -10,6 +10,7 @@ import shutil
 import tarfile
 from datetime import datetime
 from tempfile import NamedTemporaryFile, mkdtemp
+
 from celery.task import task
 from celery.utils.log import get_task_logger
 from django.conf import settings
@@ -28,6 +29,7 @@ from pytz import UTC
 from six import iteritems, text_type
 from user_tasks.models import UserTaskArtifact, UserTaskStatus
 from user_tasks.tasks import UserTask
+
 import dogstats_wrapper as dog_stats_api
 from contentstore.courseware_index import CoursewareSearchIndexer, LibrarySearchIndexer, SearchIndexingError
 from contentstore.storage import course_import_export_storage
