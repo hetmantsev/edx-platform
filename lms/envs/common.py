@@ -279,6 +279,10 @@ FEATURES = {
     # and register for course.
     'ALLOW_AUTOMATED_SIGNUPS': False,
 
+    # Default choices for role dropdown in the membership tab of the instructor dashboard
+    # This setting is used when a site does not define its own choices via site configuration
+    'MANUAL_ENROLLMENT_ROLE_CHOICES': ['Learner', 'Support', 'Partner'],
+
     # Enable display of enrollment counts in instructor dash, analytics section
     'DISPLAY_ANALYTICS_ENROLLMENTS': True,
 
