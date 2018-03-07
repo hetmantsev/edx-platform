@@ -43,18 +43,13 @@ class Command(BaseCommand):
             default=DEFAULT_FORCE_UPDATE,
             help=u'Force migrate transcripts for the requested courses, overwrite if already present.',
         )
-        parser.add_argument(
-            '--routing-key',
-            dest='routing_key',
-            help=u'The celery routing key to use.'
-        )
 
     def handle(self, *args, **options):
         if not options.get('all_courses') and len(args) < 1:
             raise CommandError('At least one course or --all-courses must be specified.')
 
         kwargs = {}
-        for key in ('all_courses', 'force_update', 'routing_key'):
+        for key in ('all_courses', 'force_update'):
             if options.get(key):
                 kwargs[key] = options[key]
 

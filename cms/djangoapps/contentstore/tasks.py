@@ -13,6 +13,7 @@ from tempfile import NamedTemporaryFile, mkdtemp
 
 from celery.task import task
 from celery.utils.log import get_task_logger
+from celery import chord
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import SuspiciousOperation
@@ -51,7 +52,6 @@ from celery_utils.persist_on_failure import PersistOnFailureTask
 from xmodule.video_module.transcripts_utils import Transcript, clean_video_id
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.exceptions import NotFoundError
-from celery.result import AsyncResult
 from edxval.api import create_video_transcript,\
     is_transcript_available,\
     create_or_update_video_transcript,\
@@ -69,36 +69,35 @@ DEFAULT_ALL_COURSES = False
 DEFAULT_FORCE_UPDATE = False
 
 
-def _task_options(routing_key):
-    task_options = {}
-    if getattr(settings, 'HIGH_MEM_QUEUE', None):
-        task_options['routing_key'] = settings.HIGH_MEM_QUEUE
-    if routing_key:
-        task_options['routing_key'] = routing_key
-    return task_options
-
-
 def enqueue_async_migrate_transcripts_tasks(
         course_ids,
         all_courses=False,
-        force_update=False,
-        routing_key=None
+        force_update=False
 ):
     store = modulestore()
+    kwargs = {'force_update': force_update}
     if all_courses:
         course_keys = [course.id for course in store.get_course_summaries()]
     else:
         course_keys = [CourseKey.from_string(id) for id in course_ids]
+    try:
+        tasks = [
+            async_migrate_transcript.s(
+                unicode(course_key),
+                **kwargs
+            ) for course_key in course_keys
+        ]
+        callback = task_status_callback.s()
+        status = chord(tasks)(callback)
+        LOGGER.info("Migration result: %s", status.get())
 
-    for course_key in course_keys:
-        options = _task_options(routing_key)
-        try:
-            task_ids = async_migrate_transcript.apply_async(
-                args=[unicode(course_key)],
-                kwargs={'force_update': force_update},
-                **options)
-        except async_migrate_transcript.OperationalError as exc:
-            LOGGER.exception('Task raised: %r', exc)
+    except Exception as exc:
+        LOGGER.exception('Exception: %r', text_type(exc))
+
+
+@task
+def task_status_callback(results):
+    return results
 
 
 @task(base=PersistOnFailureTask)
@@ -107,80 +106,67 @@ def async_migrate_transcript(*args, **kwargs):
         course_key = next(iter(args), None)
         force_update = kwargs['force_update']
         file_format = None
-        sub_tasks=[]
-
-        import logging;
-        logging.getLogger(__name__).setLevel(logging.ERROR)
+        sub_tasks = []
 
         LOGGER.info("Processing Course %s Start", course_key)
-        all_videos = get_videos_from_store(course_key)
+        all_videos = get_videos_from_store(CourseKey.from_string(course_key))
 
         for video in all_videos:
             other_lang_transcripts = video.transcripts
             english_transcript = video.sub
             LOGGER.info("Start Processing video %s", video.location)
-            try:
-                if english_transcript:
-                    LOGGER.info("Found video.sub: %s ... ", english_transcript)
-                    transcript_already_present = is_transcript_available(video.edx_video_id, 'en')
-                    LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
+
+            if english_transcript:
+                LOGGER.info("Found video.sub: %s ... ", english_transcript)
+                transcript_already_present = is_transcript_available(video.edx_video_id, 'en')
+                LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
+                if transcript_already_present and force_update:
+                   sub_tasks.append(async_migrate_transcript_subtask.s(
+                       video, 'en', video.sub, True, **kwargs
+                   ))
+                elif not transcript_already_present:
+                   sub_tasks.append(async_migrate_transcript_subtask.s(
+                       video, 'en', video.sub, False, **kwargs
+                   ))
+            else:
+                LOGGER.info("video.sub is empty")
+
+            if any(other_lang_transcripts):
+                for lang, name in other_lang_transcripts.items():
+                    transcript_already_present = is_transcript_available(video.edx_video_id, lang)
+                    LOGGER.info("Already pushed other transcript of language %s found: %s ... ",
+                                lang,
+                                transcript_already_present
+                                )
                     if transcript_already_present and force_update:
-                       result = async_migrate_transcript_subtask.apply_async(
-                           args=[video, 'en', video.sub, True], kwargs=kwargs,
-                           link_error=error_handler.s()
-                       )
-                       sub_tasks.append(result.id)
+                        sub_tasks.append(async_migrate_transcript_subtask.s(
+                            video, lang, name, True, **kwargs
+                        ))
                     elif not transcript_already_present:
-                       result = async_migrate_transcript_subtask.apply_async(
-                           args=[video, 'en', video.sub, False], kwargs=kwargs,
-                           link_error=error_handler.s()
-                       )
-                       sub_tasks.append(result.id)
-                else:
-                    LOGGER.info("video.sub is empty")
-
-                if any(other_lang_transcripts):
-                    for lang, name in other_lang_transcripts.items():
-                        transcript_already_present = is_transcript_available(video.edx_video_id, lang)
-                        LOGGER.info("Already pushed other transcript of language %s found: %s ... ",
-                                    lang,
-                                    transcript_already_present
-                                    )
-                        if transcript_already_present and force_update:
-                            result = async_migrate_transcript_subtask.apply_async(
-                                args=[video, lang, name, True], kwargs=kwargs,
-                                link_error=error_handler.s()
-                            )
-                            sub_tasks.append(result.id)
-                        elif not transcript_already_present:
-                            result = async_migrate_transcript_subtask.apply_async(
-                                args=[video, lang, name, False], kwargs=kwargs,
-                                link_error=error_handler.s()
-                            )
-                            sub_tasks.append(result.id)
-
-            except async_migrate_transcript.OperationalError as exc:
-                LOGGER.exception('Task raised: %r', exc)
-                raise
+                        sub_tasks.append(async_migrate_transcript_subtask.s(
+                            video, lang, name, False, **kwargs
+                        ))
 
             LOGGER.info("*************************End Processing video *************************")
 
         LOGGER.info("!!!!!!!!!!!!!!!!!!!!!End Processing Course!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        callback = task_status_callback.s()
+        status = chord(sub_tasks)(callback)
+        return status.get()
+    except Exception as exc:
+        LOGGER.exception('Exception: %r', text_type(exc))
+        return 'Failed: Course {0} with exception {1}'\
+            .format(course_key, text_type(exc))
 
-        return sub_tasks
-
-    except Exception as exception:
-        self.status.fail(text_type(exception))
-        return
 
 def get_videos_from_store(course_key):
     store = modulestore()
     all_videos = []
-    for video in store.get_items(CourseKey.from_string(course_key), qualifiers={'category': 'video'},
+    for video in store.get_items(course_key, qualifiers={'category': 'video'},
                                  revision=ModuleStoreEnum.RevisionOption.published_only, include_orphans=False):
         all_videos.append(video)
 
-    for video in store.get_items(CourseKey.from_string(course_key), qualifiers={'category': 'video'},
+    for video in store.get_items(course_key, qualifiers={'category': 'video'},
                                  revision=ModuleStoreEnum.RevisionOption.draft_only, include_orphans=False):
         all_videos.append(video)
 
@@ -198,14 +184,6 @@ def is_transcript_content_srt(transcript_content):
         return False
 
 
-@task(bind=True)
-def error_handler(uuid):
-    result = AsyncResult(uuid)
-    exc = result.get(propagate=False)
-    LOGGER.error('Task {0} raised exception: {1!r}\n{2!r}'.format(
-          uuid, exc, result.traceback))
-
-
 @task(base=PersistOnFailureTask)
 def async_migrate_transcript_subtask(*args, **kwargs):
     try:
@@ -213,47 +191,54 @@ def async_migrate_transcript_subtask(*args, **kwargs):
         language_code = args[1]
         transcript_name = args[2]
         force_update = args[3]
-
+        result = None
         LOGGER.info("Start migrating %s transcript", language_code)
 
         try:
             transcript_content = Transcript.asset(video.location, transcript_name, language_code)
             if video.edx_video_id:
                 LOGGER.info("Found edx_video_id= %s via first fetch asset method", video.edx_video_id)
-                push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+                result = push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
             else:
                 edx_video_id = create_external_video('external-video')
                 LOGGER.info("Created edx_video_id= %s in first fetch asset flow", edx_video_id)
                 if edx_video_id:
                     video.edx_video_id = edx_video_id
                     video.save_with_metadata(user=User.objects.get(username='staff'))
-                    push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+                    result = push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
         except NotFoundError:
             try:
                 transcript_content = Transcript.asset(video.location, None, None, transcript_name)
                 if video.edx_video_id:
                     LOGGER.info("Found edx_video_id= %s via second fetch asset method", video.edx_video_id)
-                    push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+                    result = push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
                 else:
                     edx_video_id = create_external_video('external-video')
                     LOGGER.info("Created edx_video_id= %s in second fetch asset flow", edx_video_id)
                     if edx_video_id:
                         video.edx_video_id = edx_video_id
                         video.save_with_metadata(user=User.objects.get(username='staff'))
-                        push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+                        result = push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
             except NotFoundError:
                 LOGGER.error("Could not locate asset for %s language named %s of video %s ",
                              language_code, transcript_name, video.location)
+                raise
 
         LOGGER.info("--------------------------End migrating transcript------------------------------")
-    except Exception as exception:
-        self.status.fail(text_type(exception))
-        return
+        if result is not None:
+            return 'Success: language {0} of video {1}'.format(language_code, video.edx_video_id)
+        else:
+            return 'Failed: language {0} of video {1}'.format(language_code, video.edx_video_id)
+
+    except Exception as exc:
+        LOGGER.exception('Exception: %r', text_type(exc))
+        return 'Failed: language {0} of video {1} with exception {2}'\
+            .format(language_code, video.edx_video_id, text_type(exc))
 
 def push_to_s3(edx_video_id, language_code, transcript_content, force_update=False):
     try:
-        # with transaction.atomic()
         file_format = None
+        result = None
         for key, type in dict(Transcript.mime_types).iteritems():
             if transcript_content.content_type in type:
                 file_format = key
@@ -267,24 +252,27 @@ def push_to_s3(edx_video_id, language_code, transcript_content, force_update=Fal
         edx_video_id = clean_video_id(edx_video_id)
         if file_format is not None:
             if force_update:
-                transcript_url = create_or_update_video_transcript(
+                result = create_or_update_video_transcript(
                     edx_video_id,
                     language_code,
                     dict({'file_format': file_format}),
                     ContentFile(transcript_content)
                 )
                 LOGGER.info("Push_to_S3 %s for %s with create_or_update method",
-                            True if transcript_url else False, edx_video_id)
+                            True if result else False, edx_video_id)
+                return result
             else:
-                created = create_video_transcript(
+                result = create_video_transcript(
                     edx_video_id,
                     language_code,
                     file_format,
                     ContentFile(transcript_content)
                     )
-                LOGGER.info("Push_to_S3 %s for %s with create method", created, edx_video_id)
+                LOGGER.info("Push_to_S3 %s for %s with create method", result, edx_video_id)
+                return result
         else:
-            raise RunTimeError("Cannot determine transcript file format")
+            raise ValueError("Unknown file_format for %s language in %s", language_code, edx_video_id)
+        return result
 
     except Exception as err:
         LOGGER.error("Push_failed: %s", err)
