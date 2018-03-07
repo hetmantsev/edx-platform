@@ -121,11 +121,11 @@ def async_migrate_transcript(*args, **kwargs):
                 transcript_already_present = is_transcript_available(video.edx_video_id, 'en')
                 LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
                 if transcript_already_present and force_update:
-                   sub_tasks.append(async_migrate_transcript_subtask.s(
+                    sub_tasks.append(async_migrate_transcript_subtask.s(
                        video, 'en', video.sub, True, **kwargs
                    ))
                 elif not transcript_already_present:
-                   sub_tasks.append(async_migrate_transcript_subtask.s(
+                    sub_tasks.append(async_migrate_transcript_subtask.s(
                        video, 'en', video.sub, False, **kwargs
                    ))
             else:
@@ -235,6 +235,7 @@ def async_migrate_transcript_subtask(*args, **kwargs):
         return 'Failed: language {0} of video {1} with exception {2}'\
             .format(language_code, video.edx_video_id, text_type(exc))
 
+
 def push_to_s3(edx_video_id, language_code, transcript_content, force_update=False):
     try:
         file_format = None
@@ -267,7 +268,7 @@ def push_to_s3(edx_video_id, language_code, transcript_content, force_update=Fal
                     language_code,
                     file_format,
                     ContentFile(transcript_content)
-                    )
+                )
                 LOGGER.info("Push_to_S3 %s for %s with create method", result, edx_video_id)
                 return result
         else:

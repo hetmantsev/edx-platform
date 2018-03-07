@@ -61,7 +61,6 @@ class TestArgParsing(TestCase):
             call_command('migrate_transcripts', "invalid-course")
 
 
-
 class MigrateTranscripts(ModuleStoreTestCase):
     """
     Tests migrating video transcripts in courses from contentstore to S3
@@ -109,8 +108,6 @@ class MigrateTranscripts(ModuleStoreTestCase):
         save_to_store(SRT_FILEDATA, "subs_grmtran1.srt", 'text/srt', self.video_descriptor.location)
         save_to_store(CRO_SRT_FILEDATA, "subs_croatian1.srt", 'text/srt', self.video_descriptor.location)
 
-
-
     def test_migrated_transcripts_count(self):
 
         # check that transcript does not exist
@@ -123,15 +120,14 @@ class MigrateTranscripts(ModuleStoreTestCase):
 
         call_command('migrate_transcripts', unicode(self.course.id), '--force-update')
 
-        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
-        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
+        languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
 
+        self.assertEqual(len(languages), 2)
 
     def test_migrates_transcripts_integrity(self):
         """
         Test migrating transcripts
         """
-
         translations = self.video_descriptor.available_translations(self.video_descriptor.get_transcripts_info())
         self.assertItemsEqual(translations, ['hr', 'ge'])
 
