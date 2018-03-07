@@ -137,4 +137,3 @@ class MigrateTranscripts(ModuleStoreTestCase):
 
         self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
         self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
-

@@ -122,12 +122,12 @@ def async_migrate_transcript(*args, **kwargs):
                 LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
                 if transcript_already_present and force_update:
                     sub_tasks.append(async_migrate_transcript_subtask.s(
-                       video, 'en', video.sub, True, **kwargs
-                   ))
+                        video, 'en', video.sub, True, **kwargs
+                    ))
                 elif not transcript_already_present:
                     sub_tasks.append(async_migrate_transcript_subtask.s(
-                       video, 'en', video.sub, False, **kwargs
-                   ))
+                        video, 'en', video.sub, False, **kwargs
+                    ))
             else:
                 LOGGER.info("video.sub is empty")
 
