@@ -186,14 +186,14 @@ function($, Backbone, _, Utils) {
         xhrCompleteHandler: function(xhr) {
             var resp = JSON.parse(xhr.responseText),
                 err = resp.status || gettext('Error: Uploading failed.'),
-                sub = resp.subs;
+                edx_video_id = resp.edx_video_id;
 
             this.$progress
                 .addClass(this.invisibleClass);
 
             if (xhr.status === 200) {
                 this.options.messenger.render('uploaded', resp);
-                Utils.Storage.set('sub', sub);
+                Backbone.trigger('transcripts:basicTabUpdateEdxVideoId', edx_video_id);
             } else {
                 this.options.messenger.showError(err);
             }
