@@ -89,8 +89,8 @@ def enqueue_async_migrate_transcripts_tasks(
         ]
         callback = task_status_callback.s()
         status = chord(tasks)(callback)
-        LOGGER.info("Migration result: %s", status.get())
-
+        for res in status.get():
+            LOGGER.info("Migration result: %s", '\n'.join(res))
     except Exception as exc:
         LOGGER.exception('Exception: %r', text_type(exc))
 
