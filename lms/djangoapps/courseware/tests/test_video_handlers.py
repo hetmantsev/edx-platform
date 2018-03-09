@@ -27,8 +27,6 @@ from xmodule.x_module import STUDENT_VIEW
 from .helpers import BaseTestXmodule
 from .test_video_xml import SOURCE_XML
 
-import logging
-logging.disable(logging.CRITICAL)
 
 TRANSCRIPT = {"start": [10], "end": [100], "text": ["Hi, welcome to Edx."]}
 BUMPER_TRANSCRIPT = {"start": [1], "end": [10], "text": ["A bumper"]}

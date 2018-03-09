@@ -940,36 +940,3 @@ class TestGetTranscript(SharedModuleStoreTestCase):
 
         exception_message = text_type(no_en_transcript_exception.exception)
         self.assertEqual(exception_message, 'No transcript for `en` language')
-
-    @ddt.data(
-        transcripts_utils.TranscriptsGenerationException,
-        UnicodeDecodeError('alieancodec', b'\x02\x01', 1, 2, 'alien codec found!')
-    )
-    @patch('xmodule.video_module.transcripts_utils.get_transcript_from_val')
-    def test_get_transcript_val_exceptions(self, exception_to_raise, mock_get_transcript_from_val):
-        """
-        Verify that `get_transcript_from_val` function raises `NotFoundError` when specified exceptions raised.
-        """
-        mock_get_transcript_from_val.side_effect = exception_to_raise
-        with self.assertRaises(NotFoundError):
-            transcripts_utils.get_transcript(
-                self.video,
-                self.video.get_transcripts_info(),
-            )
-
-    @ddt.data(
-        transcripts_utils.TranscriptException,
-        transcripts_utils.TranscriptsGenerationException,
-        UnicodeDecodeError('alieancodec', b'\x02\x01', 1, 2, 'alien codec found!')
-    )
-    @patch('xmodule.video_module.transcripts_utils.get_transcript_from_contentstore')
-    def test_get_transcript_content_store_exceptions(self, exception_to_raise, mock_get_transcript_from_contentstore):
-        """
-        Verify that `get_transcript_from_contentstore` function raises `NotFoundError` when specified exceptions raised.
-        """
-        mock_get_transcript_from_contentstore.side_effect = exception_to_raise
-        with self.assertRaises(NotFoundError):
-            transcripts_utils.get_transcript(
-                self.video,
-                self.video.get_transcripts_info(),
-            )

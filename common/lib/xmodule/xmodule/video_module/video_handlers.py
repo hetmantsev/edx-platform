@@ -271,7 +271,6 @@ class VideoStudentViewHandlers(object):
                     Returns list of languages, for which transcript files exist.
                     For 'en' check if SJSON exists. For non-`en` check if SRT file exists.
         """
-        # import pdb ; pdb.set_trace()
         is_bumper = request.GET.get('is_bumper', False)
         # Currently, we don't handle video pre-load/bumper transcripts in edx-val.
         feature_enabled = is_val_transcript_feature_enabled_for_course(self.course_id) and not is_bumper
