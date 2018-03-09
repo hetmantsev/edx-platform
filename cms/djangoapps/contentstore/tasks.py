@@ -49,7 +49,7 @@ from xmodule.modulestore.exceptions import DuplicateCourseError, ItemNotFoundErr
 from xmodule.modulestore.xml_exporter import export_course_to_xml, export_library_to_xml
 from xmodule.modulestore.xml_importer import import_course_from_xml, import_library_from_xml
 from celery_utils.persist_on_failure import PersistOnFailureTask
-from xmodule.video_module.transcripts_utils import Transcript, clean_video_id
+from xmodule.video_module.transcripts_utils import Transcript, clean_video_id, get_transcript_from_contentstore
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.exceptions import NotFoundError
 from edxval.api import create_video_transcript,\
@@ -195,31 +195,19 @@ def async_migrate_transcript_subtask(*args, **kwargs):
         LOGGER.info("Start migrating %s transcript", language_code)
 
         try:
-            transcript_content = Transcript.asset(video.location, transcript_name, language_code)
+            transcript_content, transcript_name, Transcript_mime_type = get_transcript_from_contentstore(
+                video, language_code, Transcript.SJSON)
             if video.edx_video_id:
                 LOGGER.info("Found edx_video_id= %s via first fetch asset method", video.edx_video_id)
-                result = push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+                result = push_to_s3(video.edx_video_id, language_code, transcript_content, Transcript.SJSON, force_update)
             else:
                 edx_video_id = create_external_video('external-video')
                 LOGGER.info("Created edx_video_id= %s in first fetch asset flow", edx_video_id)
                 if edx_video_id:
                     video.edx_video_id = edx_video_id
                     video.save_with_metadata(user=User.objects.get(username='staff'))
-                    result = push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
+                    result = push_to_s3(video.edx_video_id, language_code, transcript_content, Transcript.SJSON, force_update)
         except NotFoundError:
-            try:
-                transcript_content = Transcript.asset(video.location, None, None, transcript_name)
-                if video.edx_video_id:
-                    LOGGER.info("Found edx_video_id= %s via second fetch asset method", video.edx_video_id)
-                    result = push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
-                else:
-                    edx_video_id = create_external_video('external-video')
-                    LOGGER.info("Created edx_video_id= %s in second fetch asset flow", edx_video_id)
-                    if edx_video_id:
-                        video.edx_video_id = edx_video_id
-                        video.save_with_metadata(user=User.objects.get(username='staff'))
-                        result = push_to_s3(video.edx_video_id, language_code, transcript_content, force_update)
-            except NotFoundError:
                 LOGGER.error("Could not locate asset for %s language named %s of video %s ",
                              language_code, transcript_name, video.location)
                 raise
@@ -236,45 +224,31 @@ def async_migrate_transcript_subtask(*args, **kwargs):
             .format(language_code, video.edx_video_id, text_type(exc))
 
 
-def push_to_s3(edx_video_id, language_code, transcript_content, force_update=False):
+def push_to_s3(edx_video_id, language_code, transcript_content, file_format=Transcript.SJSON, force_update=False):
     try:
-        file_format = None
         result = None
-        for key, type in dict(Transcript.mime_types).iteritems():
-            if transcript_content.content_type in type:
-                file_format = key
-                break
-
-        if file_format is None and is_transcript_content_srt(transcript_content):
-            file_format = Transcript.SRT
-
-        LOGGER.info("Content is %s!!!", transcript_content.content_type)
         LOGGER.info("File Format is %s!!!", file_format)
         edx_video_id = clean_video_id(edx_video_id)
-        if file_format is not None:
-            if force_update:
-                result = create_or_update_video_transcript(
-                    edx_video_id,
-                    language_code,
-                    dict({'file_format': file_format}),
-                    ContentFile(transcript_content)
-                )
-                LOGGER.info("Push_to_S3 %s for %s with create_or_update method",
-                            True if result else False, edx_video_id)
-                return result
-            else:
-                result = create_video_transcript(
-                    edx_video_id,
-                    language_code,
-                    file_format,
-                    ContentFile(transcript_content)
-                )
-                LOGGER.info("Push_to_S3 %s for %s with create method", result, edx_video_id)
-                return result
+        if force_update:
+            result = create_or_update_video_transcript(
+                edx_video_id,
+                language_code,
+                dict({'file_format': file_format}),
+                ContentFile(transcript_content)
+            )
+            LOGGER.info("Push_to_S3 %s for %s with create_or_update method",
+                        True if result else False, edx_video_id)
+            return result
         else:
-            raise ValueError("Unknown file_format for %s language in %s", language_code, edx_video_id)
+            result = create_video_transcript(
+                edx_video_id,
+                language_code,
+                file_format,
+                ContentFile(transcript_content)
+            )
+            LOGGER.info("Push_to_S3 %s for %s with create method", result, edx_video_id)
+            return result
         return result
-
     except Exception as err:
         LOGGER.error("Push_failed: %s", err)
         raise
