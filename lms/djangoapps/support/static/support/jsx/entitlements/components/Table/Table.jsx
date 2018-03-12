@@ -1,5 +1,6 @@
 import React from 'react';
 import moment from 'moment';
+import PropTypes from 'prop-types';
 
 import { Button, Hyperlink, Table } from '@edx/paragon';
 
@@ -94,6 +95,11 @@ const EntitlementTable = props => {
       />
     </div>
   )
+}
+
+EntitlementTable.propTypes = {
+    entitlements: PropTypes.array.isRequired,
+    ecommerceUrl: PropTypes.string.isRequired
 }
 
 export default EntitlementTable;

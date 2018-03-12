@@ -3,7 +3,7 @@ import PropTypes from 'prop-types';
 
 import { StatusAlert } from '@edx/paragon';
 import SearchContainer from '../Search/SearchContainer';
-import EntitlementTable from '../Table/Table';
+import TableContainer from '../Table/TableContainer';
 
 
 const Main = (props) => (
@@ -18,7 +18,7 @@ const Main = (props) => (
       Entitlement Support Page
     </h2>
     <SearchContainer/>
-    <EntitlementTable 
+    <TableContainer
       entitlements={ props.entitlements }
       openReissueModal={ props.openReissueModal }
       ecommerceUrl={ props.ecommerceUrl } 
