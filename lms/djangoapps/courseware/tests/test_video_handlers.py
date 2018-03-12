@@ -373,16 +373,12 @@ class TestTranscriptAvailableTranslationsBumperDispatch(TestVideo):
         response = self.item.transcript(request=request, dispatch=self.dispatch)
         self.assertEqual(json.loads(response.body), [lang])
 
-    @ddt.data(True, False)
     @patch('xmodule.video_module.transcripts_utils.get_available_transcript_languages')
-    @patch('openedx.core.djangoapps.video_config.models.VideoTranscriptEnabledFlag.feature_enabled')
-    def test_multiple_available_translations(self, feature_enabled,
-                                             mock_val_video_transcript_feature, mock_get_transcript_languages):
+    def test_multiple_available_translations(self, mock_get_transcript_languages):
         """
-        Verify that the available translations dispatch works as expected for multiple translations with
-        or without enabling the edx-val video transcripts feature.
+        Verify that available translations dispatch works as expected for multiple
+        translations and returns both content store and edxval translations.
         """
-        mock_val_video_transcript_feature.return_value = feature_enabled
         # Assuming that edx-val has German translation available for this video component.
         mock_get_transcript_languages.return_value = ['de']
         en_translation = _create_srt_file()
@@ -400,7 +396,7 @@ class TestTranscriptAvailableTranslationsBumperDispatch(TestVideo):
         request = Request.blank('/' + self.dispatch)
         response = self.item.transcript(request=request, dispatch=self.dispatch)
         # Assert that bumper only get its own translations.
-        self.assertEqual(json.loads(response.body), ['en', 'uk'])
+        self.assertEqual(json.loads(response.body), ['de', 'en', 'uk'])
 
 
 @ddt.ddt

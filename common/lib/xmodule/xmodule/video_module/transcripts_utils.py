@@ -729,29 +729,30 @@ class VideoTranscriptsMixin(object):
 
         sub, other_langs = transcripts["sub"], transcripts["transcripts"]
 
+        # include val transcripts
+        translations = get_available_transcript_languages(edx_video_id=self.edx_video_id)
+
         # If we're not verifying the assets, we just trust our field values
         if not verify_assets:
+
             if other_langs:
                 translations = list(other_langs)
+
             if not translations or sub:
                 translations += ['en']
-            return translations
 
-        # If we've gotten this far, we're going to verify that the transcripts
-        # being referenced are actually either in the contentstore or in edx-val.
-        if include_val_transcripts:
-            translations = get_available_transcript_languages(edx_video_id=self.edx_video_id)
+            return list(set(translations))
 
         if sub:  # check if sjson exists for 'en'.
             try:
-                Transcript.asset(self.location, sub, 'en')
+                get_transcript_for_video(
+                    self.location,
+                    sub,
+                    sub,
+                    u'en'
+                )
             except NotFoundError:
-                try:
-                    Transcript.asset(self.location, None, None, sub)
-                except NotFoundError:
-                    pass
-                else:
-                    translations.append('en')
+                pass
             else:
                 translations.append('en')
 
