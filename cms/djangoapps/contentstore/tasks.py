@@ -67,15 +67,20 @@ FILE_READ_CHUNK = 1024  # bytes
 FULL_COURSE_REINDEX_THRESHOLD = 1
 DEFAULT_ALL_COURSES = False
 DEFAULT_FORCE_UPDATE = False
+DEFAULT_COMMIT = False
 
 
 def enqueue_async_migrate_transcripts_tasks(
         course_ids,
         all_courses=False,
-        force_update=False
+        force_update=False,
+        commit=False
 ):
     store = modulestore()
-    kwargs = {'force_update': force_update}
+    kwargs = {
+        'force_update': force_update,
+        'commit': commit
+              }
     if all_courses:
         course_keys = [course.id for course in store.get_course_summaries()]
     else:
@@ -104,20 +109,21 @@ def task_status_callback(results):
 def async_migrate_transcript(*args, **kwargs):
     try:
         course_key = next(iter(args), None)
+        if not modulestore().get_course(CourseKey.from_string(course_key)):
+            raise KeyError(u'Invalid course key: ' + unicode(course_key))
         force_update = kwargs['force_update']
-        file_format = None
+        commit = kwargs['commit']
         sub_tasks = []
 
-        LOGGER.info("Processing Course %s Start", course_key)
+        LOGGER.info("[Transcript migration] process for course %s started", course_key)
         all_videos = get_videos_from_store(CourseKey.from_string(course_key))
 
         for video in all_videos:
             other_lang_transcripts = video.transcripts
             english_transcript = video.sub
-            LOGGER.info("Start Processing video %s", video.location)
+            LOGGER.info("[Transcript migration] process for video %s started", video.location)
 
             if english_transcript:
-                LOGGER.info("Found video.sub: %s ... ", english_transcript)
                 transcript_already_present = is_transcript_available(video.edx_video_id, 'en')
                 LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
                 if transcript_already_present and force_update:
@@ -130,11 +136,10 @@ def async_migrate_transcript(*args, **kwargs):
                     ))
             else:
                 LOGGER.info("video.sub is empty")
-
             if any(other_lang_transcripts):
                 for lang, name in other_lang_transcripts.items():
                     transcript_already_present = is_transcript_available(video.edx_video_id, lang)
-                    LOGGER.info("Already pushed other transcript of language %s found: %s ... ",
+                    LOGGER.info("Already pushed other transcript of language %s found: %s ",
                                 lang,
                                 transcript_already_present
                                 )
@@ -146,17 +151,17 @@ def async_migrate_transcript(*args, **kwargs):
                         sub_tasks.append(async_migrate_transcript_subtask.s(
                             video, lang, name, False, **kwargs
                         ))
-
-            LOGGER.info("*************************End Processing video *************************")
-
-        LOGGER.info("!!!!!!!!!!!!!!!!!!!!!End Processing Course!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            LOGGER.info("[Transcript migration] process for video %s ended", video.location)
+        LOGGER.info("[Transcript migration] process for course %s ended", course_key)
         callback = task_status_callback.s()
         status = chord(sub_tasks)(callback)
         return status.get()
     except Exception as exc:
         LOGGER.exception('Exception: %r', text_type(exc))
-        return 'Failed: Course {0} with exception {1}'\
-            .format(course_key, text_type(exc))
+        return 'Failed: course {course_key} with exception {exception}'.format(
+            course_key=course_key,
+            exception=text_type(exc)
+        )
 
 
 def get_videos_from_store(course_key):
@@ -173,17 +178,6 @@ def get_videos_from_store(course_key):
     return all_videos
 
 
-def is_transcript_content_srt(transcript_content):
-    try:
-        srt_subs_obj = SubRipFile.from_string(transcript_content.data.decode('utf-8-sig'))
-        if len(srt_subs_obj) > 0:
-            LOGGER.info("SRT file format detected")
-        return True
-    except Exception as ex:
-        LOGGER.info("SRT file format could not be detected")
-        return False
-
-
 @task(base=PersistOnFailureTask)
 def async_migrate_transcript_subtask(*args, **kwargs):
     try:
@@ -191,28 +185,40 @@ def async_migrate_transcript_subtask(*args, **kwargs):
         language_code = args[1]
         transcript_name = args[2]
         force_update = args[3]
+        commit = kwargs['commit']
         result = None
-        LOGGER.info("Start migrating %s transcript", language_code)
-
+        if commit is not True:
+            return 'Language {0} transcript of video {1} will be migrated'.format(language_code, video.edx_video_id)
+        LOGGER.info("[Transcript migration] process for %s transcript started", language_code)
         try:
             transcript_content, transcript_name, Transcript_mime_type = get_transcript_from_contentstore(
                 video, language_code, Transcript.SJSON)
             if video.edx_video_id:
-                LOGGER.info("Found edx_video_id= %s via first fetch asset method", video.edx_video_id)
-                result = push_to_s3(video.edx_video_id, language_code, transcript_content, Transcript.SJSON, force_update)
+                result = push_to_s3(
+                    video.edx_video_id,
+                    language_code,
+                    transcript_content,
+                    Transcript.SJSON,
+                    force_update
+                )
             else:
                 edx_video_id = create_external_video('external-video')
-                LOGGER.info("Created edx_video_id= %s in first fetch asset flow", edx_video_id)
                 if edx_video_id:
                     video.edx_video_id = edx_video_id
                     video.save_with_metadata(user=User.objects.get(username='staff'))
-                    result = push_to_s3(video.edx_video_id, language_code, transcript_content, Transcript.SJSON, force_update)
+                    result = push_to_s3(
+                        video.edx_video_id,
+                        language_code,
+                        transcript_content,
+                        Transcript.SJSON,
+                        force_update
+                    )
         except NotFoundError:
                 LOGGER.error("Could not locate asset for %s language named %s of video %s ",
                              language_code, transcript_name, video.location)
                 raise
 
-        LOGGER.info("--------------------------End migrating transcript------------------------------")
+        LOGGER.info("[Transcript migration] process for %s transcript ended", language_code)
         if result is not None:
             return 'Success: language {0} of video {1}'.format(language_code, video.edx_video_id)
         else:
@@ -220,11 +226,20 @@ def async_migrate_transcript_subtask(*args, **kwargs):
 
     except Exception as exc:
         LOGGER.exception('Exception: %r', text_type(exc))
-        return 'Failed: language {0} of video {1} with exception {2}'\
-            .format(language_code, video.edx_video_id, text_type(exc))
+        return 'Failed: language {language} of video {video} with exception {exception}'.format(
+            language=language_code,
+            video=video.edx_video_id,
+            exception=text_type(exc)
+        )
 
 
-def push_to_s3(edx_video_id, language_code, transcript_content, file_format=Transcript.SJSON, force_update=False):
+def push_to_s3(
+        edx_video_id,
+        language_code,
+        transcript_content,
+        file_format=Transcript.SJSON,
+        force_update=False
+):
     try:
         result = None
         LOGGER.info("File Format is %s!!!", file_format)
@@ -248,7 +263,6 @@ def push_to_s3(edx_video_id, language_code, transcript_content, file_format=Tran
             )
             LOGGER.info("Push_to_S3 %s for %s with create method", result, edx_video_id)
             return result
-        return result
     except Exception as err:
         LOGGER.error("Push_failed: %s", err)
         raise

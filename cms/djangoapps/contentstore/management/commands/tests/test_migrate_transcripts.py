@@ -37,9 +37,9 @@ Kako ste danas?
 
 
 VIDEO_DICT_STAR = dict(
-    client_video_id="TWINKLE TWINKLE",
+    client_video_id='TWINKLE TWINKLE',
     duration=42.0,
-    edx_video_id="test_edx_video_id",
+    edx_video_id='test_edx_video_id',
     status="upload",
 )
 
@@ -105,35 +105,72 @@ class MigrateTranscripts(ModuleStoreTestCase):
             data={'data': video_sample_xml}
         )
 
-        save_to_store(SRT_FILEDATA, "subs_grmtran1.srt", 'text/srt', self.video_descriptor.location)
-        save_to_store(CRO_SRT_FILEDATA, "subs_croatian1.srt", 'text/srt', self.video_descriptor.location)
+        save_to_store(SRT_FILEDATA, 'subs_grmtran1.srt', 'text/srt', self.video_descriptor.location)
+        save_to_store(CRO_SRT_FILEDATA, 'subs_croatian1.srt', 'text/srt', self.video_descriptor.location)
 
     def test_migrated_transcripts_count(self):
 
         # check that transcript does not exist
-
         languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
-
         self.assertEqual(len(languages), 0)
 
-        # now call migrate_transcripts command and check the transcript integrity
-
-        call_command('migrate_transcripts', unicode(self.course.id), '--force-update')
+        # now call migrate_transcripts command and check the transcript availability
+        call_command('migrate_transcripts', unicode(self.course.id), '--commit')
 
         languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
-
         self.assertEqual(len(languages), 2)
 
-    def test_migrates_transcripts_integrity(self):
+    def test_migrated_transcripts_without_commit(self):
+
+        # check that transcripts do not exist
+        languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
+        self.assertEqual(len(languages), 0)
+
+        # now call migrate_transcripts command and check the transcript availability
+        call_command('migrate_transcripts', unicode(self.course.id))
+
+        # check that transcripts still do not exist
+        languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
+        self.assertEqual(len(languages), 0)
+
+    def test_migrates_transcripts_availability(self):
         """
         Test migrating transcripts
         """
         translations = self.video_descriptor.available_translations(self.video_descriptor.get_transcripts_info())
         self.assertItemsEqual(translations, ['hr', 'ge'])
+        self.assertFalse(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
+        self.assertFalse(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
 
-        # now call migrate_transcripts command and check the transcript integrity
+        # now call migrate_transcripts command and check the transcript availability
+        call_command('migrate_transcripts', unicode(self.course.id), '--commit')
 
-        call_command('migrate_transcripts', unicode(self.course.id), '--force-update')
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
+
+    def test_migrates_transcripts_idempotency(self):
+        """
+        Test migrating transcripts multiple times
+        """
+        translations = self.video_descriptor.available_translations(self.video_descriptor.get_transcripts_info())
+        self.assertItemsEqual(translations, ['hr', 'ge'])
+        self.assertFalse(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
+        self.assertFalse(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
+
+        # now call migrate_transcripts command and check the transcript availability
+        call_command('migrate_transcripts', unicode(self.course.id), '--commit')
+
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
+
+        # now call migrate_transcripts command again and check the transcript availability
+        call_command('migrate_transcripts', unicode(self.course.id), '--commit')
+
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
+        self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
+
+        # now call migrate_transcripts command with --force-update and check the transcript availability
+        call_command('migrate_transcripts', unicode(self.course.id), '--force-update', '--commit')
 
         self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
         self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))

@@ -11,6 +11,7 @@ from opaque_keys import InvalidKeyError
 from cms.djangoapps.contentstore.tasks import (
     DEFAULT_ALL_COURSES,
     DEFAULT_FORCE_UPDATE,
+    DEFAULT_COMMIT,
     enqueue_async_migrate_transcripts_tasks
 )
 
@@ -20,8 +21,8 @@ log = logging.getLogger(__name__)
 class Command(BaseCommand):
     """
     Example usage:
-        $ ./manage.py cms migrate_transcripts --all-courses --settings=devstack_docker
-        $ ./manage.py cms migrate_transcripts 'edX/DemoX/Demo_Course' --settings=devstack_docker
+        $ ./manage.py cms migrate_transcripts --all-courses --force-update --commit
+        $ ./manage.py cms migrate_transcripts 'edX/DemoX/Demo_Course' --force-update --commit
     """
     args = '<course_id course_id ...>'
     help = 'Migrates transcripts to S3 for one or more courses.'
@@ -39,9 +40,18 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             '--force-update', '--force_update',
+            dest='force_update',
             action='store_true',
             default=DEFAULT_FORCE_UPDATE,
             help=u'Force migrate transcripts for the requested courses, overwrite if already present.',
+        )
+        parser.add_argument(
+            '--commit',
+            dest='commit',
+            action='store_true',
+            default=DEFAULT_COMMIT,
+            help=u'Commits the discovered video transcripts to S3. '
+                 u'Without this flag, the command will return the transcripts discovered for migration ',
         )
 
     def handle(self, *args, **options):
@@ -49,7 +59,7 @@ class Command(BaseCommand):
             raise CommandError('At least one course or --all-courses must be specified.')
 
         kwargs = {}
-        for key in ('all_courses', 'force_update'):
+        for key in ('all_courses', 'force_update', 'commit'):
             if options.get(key):
                 kwargs[key] = options[key]
 
@@ -59,4 +69,4 @@ class Command(BaseCommand):
                 **kwargs
             )
         except InvalidKeyError as exc:
-            raise CommandError(u'Invalid Course Key: ' + unicode(exc))
+            raise CommandError(u'Invalid course key: ' + unicode(exc))
