@@ -19,7 +19,7 @@ const Main = (props) => (
   </div>
 );
 
-Main.PropTypes = {
+Main.propTypes = {
   errorMessage: PropTypes.string.isRequired,
   dismissErrorMessage: PropTypes.func.isRequired,
 };
