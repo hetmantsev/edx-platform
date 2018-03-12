@@ -760,7 +760,11 @@ class TestGetTranscript(SharedModuleStoreTestCase):
 
         self.user = UserFactory.create()
         self.vertical = ItemFactory.create(category='vertical', parent_location=self.course.location)
-        self.video = ItemFactory.create(category='video', parent_location=self.vertical.location)
+        self.video = ItemFactory.create(
+            category='video',
+            parent_location=self.vertical.location,
+            edx_video_id=u'1234-5678-90'
+        )
 
     def create_transcript(self, subs_id, language=u'en', filename='video.srt'):
         """
@@ -774,7 +778,8 @@ class TestGetTranscript(SharedModuleStoreTestCase):
             category='video',
             parent_location=self.vertical.location,
             sub=subs_id,
-            transcripts=transcripts
+            transcripts=transcripts,
+            edx_video_id=u'1234-5678-90'
         )
 
         if subs_id:
@@ -825,7 +830,6 @@ class TestGetTranscript(SharedModuleStoreTestCase):
         with self.assertRaises(NotFoundError):
             transcripts_utils.get_transcript(
                 self.video,
-                self.video.get_transcripts_info(),
                 lang=lang
             )
 
@@ -850,7 +854,6 @@ class TestGetTranscript(SharedModuleStoreTestCase):
         self.create_transcript(subs_id, language, filename)
         content, filename, mimetype = transcripts_utils.get_transcript(
             self.video,
-            self.video.get_transcripts_info(),
             language
         )
 
@@ -866,7 +869,6 @@ class TestGetTranscript(SharedModuleStoreTestCase):
         self.create_transcript(self.subs_id, language)
         content, filename, mimetype = transcripts_utils.get_transcript(
             self.video,
-            self.video.get_transcripts_info(),
             language,
             output_format=transcripts_utils.Transcript.SJSON
         )
@@ -887,7 +889,6 @@ class TestGetTranscript(SharedModuleStoreTestCase):
 
         content, filename, mimetype = transcripts_utils.get_transcript(
             self.video,
-            self.video.get_transcripts_info(),
         )
         self.assertEqual(content, self.subs_srt)
         self.assertEqual(filename, 'edx.srt')
@@ -900,7 +901,6 @@ class TestGetTranscript(SharedModuleStoreTestCase):
         with self.assertRaises(NotFoundError) as invalid_format_exception:
             transcripts_utils.get_transcript(
                 self.video,
-                self.video.get_transcripts_info(),
                 'ur',
                 output_format='mpeg'
             )
@@ -918,7 +918,6 @@ class TestGetTranscript(SharedModuleStoreTestCase):
         with self.assertRaises(NotFoundError) as no_content_exception:
             transcripts_utils.get_transcript(
                 self.video,
-                self.video.get_transcripts_info(),
                 'ur'
             )
 
@@ -934,7 +933,6 @@ class TestGetTranscript(SharedModuleStoreTestCase):
         with self.assertRaises(NotFoundError) as no_en_transcript_exception:
             transcripts_utils.get_transcript(
                 self.video,
-                self.video.get_transcripts_info(),
                 'en'
             )
 

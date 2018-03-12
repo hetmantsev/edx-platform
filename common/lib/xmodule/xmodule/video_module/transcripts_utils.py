@@ -974,13 +974,12 @@ def get_transcript_from_contentstore(video, language, output_format, transcripts
     return transcript_content, transcript_name, Transcript.mime_types[output_format]
 
 
-def get_transcript(video, transcripts_info, lang=None, output_format=Transcript.SRT, youtube_id=None):
+def get_transcript(video, lang=None, output_format=Transcript.SRT, youtube_id=None):
     """
     Get video transcript from edx-val or content store.
 
     Arguments:
         video (Video Descriptor): Video Descriptor
-        transcripts_info (dict): transcript info for a video
         lang (unicode): transcript language
         output_format (unicode): transcript output format
         youtube_id (unicode): youtube video id
@@ -988,10 +987,14 @@ def get_transcript(video, transcripts_info, lang=None, output_format=Transcript.
     Returns:
         tuple containing content, filename, mimetype
     """
+    transcripts_info = video.get_transcripts_info()
     if not lang:
         lang = video.get_default_transcript_language(transcripts_info)
 
     try:
+        edx_video_id = clean_video_id(video.edx_video_id)
+        if not edx_video_id:
+            raise NotFoundError
         return get_transcript_from_val(video.edx_video_id, lang, output_format)
     except NotFoundError:
         return get_transcript_from_contentstore(

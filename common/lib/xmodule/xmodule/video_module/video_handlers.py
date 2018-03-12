@@ -32,7 +32,7 @@ from .transcripts_utils import (
     TranscriptsGenerationException,
     youtube_speed_dict,
     get_transcript,
-    get_transcript_from_val,
+    get_transcript_from_contentstore
 )
 from .transcripts_model_utils import (
     is_val_transcript_feature_enabled_for_course
@@ -248,6 +248,29 @@ class VideoStudentViewHandlers(object):
         self.runtime.publish(self, "completion", data)
         return {"result": "ok"}
 
+    @staticmethod
+    def make_transcript_http_response(content, filename, language, content_type):
+        """
+        Construct `Response` object.
+
+        Arguments:
+            content (unicode): transcript content
+            filename (unicode): transcript filename
+            language (unicode): transcript language
+            mimetype (unicode): transcript content type
+        """
+        response = Response(
+            content,
+            headerlist=[
+                ('Content-Disposition', 'attachment; filename="{}"'.format(filename.encode('utf-8'))),
+                ('Content-Language', language),
+            ],
+            charset='utf8'
+        )
+        response.content_type = content_type
+
+        return response
+
     @XBlock.handler
     def transcript(self, request, dispatch):
         """
@@ -275,6 +298,7 @@ class VideoStudentViewHandlers(object):
         # Currently, we don't handle video pre-load/bumper transcripts in edx-val.
         feature_enabled = is_val_transcript_feature_enabled_for_course(self.course_id) and not is_bumper
         transcripts = self.get_transcripts_info(is_bumper, include_val_transcripts=feature_enabled)
+
         if dispatch.startswith('translation'):
             language = dispatch.replace('translation', '').strip('/')
 
@@ -290,22 +314,33 @@ class VideoStudentViewHandlers(object):
                 self.transcript_language = language
 
             try:
+                if is_bumper:
+                    content, filename, mimetype = get_transcript_from_contentstore(
+                        self,
+                        self.transcript_language,
+                        Transcript.SJSON,
+                        transcripts
+                    )
+
+                    return self.make_transcript_http_response(
+                        content,
+                        filename,
+                        self.transcript_language,
+                        mimetype
+                    )
+
                 content, filename, mimetype = get_transcript(
                     self,
-                    transcripts,
                     lang=self.transcript_language,
                     output_format=Transcript.SJSON,
                     youtube_id=request.GET.get('videoId', None),
                 )
-                response = Response(
+                response = self.make_transcript_http_response(
                     content,
-                    headerlist=[
-                        ('Content-Disposition', 'attachment; filename="{}"'.format(filename.encode('utf-8'))),
-                        ('Content-Language', self.transcript_language),
-                    ],
-                    charset='utf8',
+                    filename,
+                    self.transcript_language,
+                    mimetype
                 )
-                response.content_type = mimetype
             except NotFoundError as ex:
                 log.info(six.text_type(ex))
                 return self.get_static_transcript(request, transcripts)
@@ -313,20 +348,16 @@ class VideoStudentViewHandlers(object):
             lang = request.GET.get('lang', None)
 
             try:
-                content, filename, mimetype = get_transcript(self, transcripts, lang)
+                content, filename, mimetype = get_transcript(self, lang)
             except NotFoundError:
                 return Response(status=404)
 
-            response = Response(
+            response = self.make_transcript_http_response(
                 content,
-                headerlist=[
-                    ('Content-Disposition', 'attachment; filename="{}"'.format(filename.encode('utf-8'))),
-                    ('Content-Language', self.transcript_language),
-                ],
-                charset='utf8'
+                filename,
+                self.transcript_language,
+                mimetype
             )
-            response.content_type = mimetype
-
         elif dispatch.startswith('available_translations'):
 
             available_translations = self.available_translations(
