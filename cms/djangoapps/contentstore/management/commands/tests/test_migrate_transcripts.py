@@ -14,6 +14,10 @@ from datetime import datetime
 import pytz
 from edxval import api as api
 
+import logging
+from testfixtures import LogCapture
+
+LOGGER_NAME = "cms.djangoapps.contentstore.tasks"
 
 SRT_FILEDATA = '''
 0
@@ -108,7 +112,7 @@ class MigrateTranscripts(ModuleStoreTestCase):
         save_to_store(SRT_FILEDATA, 'subs_grmtran1.srt', 'text/srt', self.video_descriptor.location)
         save_to_store(CRO_SRT_FILEDATA, 'subs_croatian1.srt', 'text/srt', self.video_descriptor.location)
 
-    def test_migrated_transcripts_count(self):
+    def test_migrated_transcripts_count_with_commit(self):
 
         # check that transcript does not exist
         languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
@@ -133,7 +137,7 @@ class MigrateTranscripts(ModuleStoreTestCase):
         languages = api.get_available_transcript_languages(self.video_descriptor.edx_video_id)
         self.assertEqual(len(languages), 0)
 
-    def test_migrates_transcripts_availability(self):
+    def test_migrate_transcripts_availability(self):
         """
         Test migrating transcripts
         """
@@ -148,7 +152,7 @@ class MigrateTranscripts(ModuleStoreTestCase):
         self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
         self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
 
-    def test_migrates_transcripts_idempotency(self):
+    def test_migrate_transcripts_idempotency(self):
         """
         Test migrating transcripts multiple times
         """
@@ -174,3 +178,36 @@ class MigrateTranscripts(ModuleStoreTestCase):
 
         self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'hr'))
         self.assertTrue(api.is_transcript_available(self.video_descriptor.edx_video_id, 'ge'))
+
+    def test_migrate_transcripts_logging(self):
+        expected_log = (
+            (LOGGER_NAME,
+             'INFO',
+             u'[Transcript migration] process for course org.4/course_4/Run_4 started'),
+            (LOGGER_NAME,
+             'INFO',
+             '[Transcript migration] process for video i4x://org.4/course_4/video/video_5 started'),
+            (LOGGER_NAME, 'INFO', 'video.sub is empty'),
+            (LOGGER_NAME,
+             'INFO',
+             u'Already pushed other transcript of language hr found: False '),
+            (LOGGER_NAME,
+             'INFO',
+             u'Already pushed other transcript of language ge found: False '),
+            (LOGGER_NAME,
+             'INFO',
+             '[Transcript migration] process for video i4x://org.4/course_4/video/video_5 ended'),
+            (LOGGER_NAME,
+             'INFO',
+             u'[Transcript migration] process for course org.4/course_4/Run_4 ended'),
+            (LOGGER_NAME,
+             'INFO',
+             'Migration result: Language hr transcript of video test_edx_video_id will be migrated\n'
+             'Language ge transcript of video test_edx_video_id will be migrated')
+        )
+
+        with LogCapture(LOGGER_NAME, level=logging.INFO) as logger:
+            call_command('migrate_transcripts', unicode(self.course.id))
+            logger.check(
+                *expected_log
+            )
