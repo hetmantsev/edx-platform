@@ -249,7 +249,7 @@ class VideoStudentViewHandlers(object):
         return {"result": "ok"}
 
     @staticmethod
-    def make_transcript_http_response(content, filename, language, content_type):
+    def make_transcript_http_response(content, filename, language, content_type, add_attachment_header=True):
         """
         Construct `Response` object.
 
@@ -258,13 +258,20 @@ class VideoStudentViewHandlers(object):
             filename (unicode): transcript filename
             language (unicode): transcript language
             mimetype (unicode): transcript content type
+            add_attachment_header (bool): whether to add attachment header or not
         """
+        headerlist = [
+            ('Content-Language', language),
+        ]
+
+        if add_attachment_header:
+            headerlist.append(
+                ('Content-Disposition', 'attachment; filename="{}"'.format(filename.encode('utf-8')))
+            )
+
         response = Response(
             content,
-            headerlist=[
-                ('Content-Disposition', 'attachment; filename="{}"'.format(filename.encode('utf-8'))),
-                ('Content-Language', language),
-            ],
+            headerlist=headerlist,
             charset='utf8'
         )
         response.content_type = content_type
@@ -321,28 +328,23 @@ class VideoStudentViewHandlers(object):
                         Transcript.SJSON,
                         transcripts
                     )
-
-                    return self.make_transcript_http_response(
-                        content,
-                        filename,
-                        self.transcript_language,
-                        mimetype
+                else:
+                    content, filename, mimetype = get_transcript(
+                        self,
+                        lang=self.transcript_language,
+                        output_format=Transcript.SJSON,
+                        youtube_id=request.GET.get('videoId'),
                     )
 
-                content, filename, mimetype = get_transcript(
-                    self,
-                    lang=self.transcript_language,
-                    output_format=Transcript.SJSON,
-                    youtube_id=request.GET.get('videoId', None),
-                )
                 response = self.make_transcript_http_response(
                     content,
                     filename,
                     self.transcript_language,
-                    mimetype
+                    mimetype,
+                    add_attachment_header=False
                 )
-            except NotFoundError as ex:
-                log.info(six.text_type(ex))
+            except NotFoundError:
+                log.exception('[Translation Dispatch] %s', self.location)
                 return self.get_static_transcript(request, transcripts)
         elif dispatch == 'download':
             lang = request.GET.get('lang', None)
