@@ -204,8 +204,6 @@ class MigrateTranscripts(ModuleStoreTestCase):
              'Migration result: Language hr transcript of video test_edx_video_id will be migrated\nLanguage ge transcript of video test_edx_video_id will be migrated')
         )
 
-
-
         with LogCapture(LOGGER_NAME, level=logging.INFO) as logger:
             call_command('migrate_transcripts', unicode(self.course.id))
             logger.check(
