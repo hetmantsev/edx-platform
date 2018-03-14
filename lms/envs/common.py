@@ -2350,6 +2350,7 @@ INSTALLED_APPS = [
 
     # DRF filters
     'django_filters',
+    'completion_aggregator',
 ]
 
 ######################### CSRF #########################################
@@ -3437,6 +3438,7 @@ EDX_PLATFORM_REVISION = 'unknown'
 # Once a user has watched this percentage of a video, mark it as complete:
 # (0.0 = 0%, 1.0 = 100%)
 COMPLETION_VIDEO_COMPLETE_PERCENTAGE = 0.95
+COMPLETION_AGGREGATOR_BLOCK_TYPES = {'course', 'chapter', 'sequential', 'vertical'}
 
 ############### Settings for Django Rate limit #####################
 RATELIMIT_ENABLE = True

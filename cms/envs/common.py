@@ -1127,6 +1127,7 @@ INSTALLED_APPS = [
 
     # Asset management for mako templates
     'pipeline_mako',
+    'completion_aggregator',
 ]
 
 
