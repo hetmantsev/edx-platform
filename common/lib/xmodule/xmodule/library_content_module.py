@@ -54,6 +54,15 @@ def _get_capa_types():
     ], key=lambda item: item.get('display_name'))
 
 
+def _sample(population, k):
+    """
+    Creates a new random.Random instance and uses its sample()
+    method to draw k items from the given population.
+    """
+    random_instance = random.Random()
+    return random_instance.sample(population, k)
+
+
 class LibraryContentFields(object):
     """
     Fields for the LibraryContentModule.
@@ -176,7 +185,7 @@ class LibraryContentModule(LibraryContentFields, XModule, StudioEditableModule):
             pool = valid_block_keys - selected
             if mode == "random":
                 num_to_add = min(len(pool), num_to_add)
-                added_block_keys = set(random.sample(pool, num_to_add))
+                added_block_keys = set(_sample(pool, num_to_add))
                 # We now have the correct n random children to show for this user.
             else:
                 raise NotImplementedError("Unsupported mode.")

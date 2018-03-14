@@ -4,13 +4,16 @@ Basic unit tests for LibraryContentModule
 
 Higher-level tests are in `cms/djangoapps/contentstore/tests/test_libraries.py`.
 """
+from collections import Counter
+from unittest import TestCase
+
 from bson.objectid import ObjectId
 from mock import Mock, patch
 
 from web_fragments.fragment import Fragment
 from xblock.runtime import Runtime as VanillaRuntime
 
-from xmodule.library_content_module import ANY_CAPA_TYPE_VALUE, LibraryContentDescriptor
+from xmodule.library_content_module import ANY_CAPA_TYPE_VALUE, LibraryContentDescriptor, _sample
 from xmodule.library_tools import LibraryToolsService
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.modulestore.tests.factories import LibraryFactory, CourseFactory
@@ -21,6 +24,23 @@ from xmodule.x_module import AUTHOR_VIEW
 from search.search_engine_base import SearchEngine
 
 dummy_render = lambda block, _: Fragment(block.data)  # pylint: disable=invalid-name
+
+
+class TestHelperFunctions(TestCase):
+    """
+    Test class for library_content_module helper functions.
+    """
+    def test_sample(self):
+        """
+        Tests that _sample pulls relatively uniformly from a population.
+        """
+        population = list(range(10))
+        selections = Counter()
+        for _ in xrange(1000):
+            selections[_sample(population, 1)[0]] += 1
+
+        for element in population:
+            self.assertTrue(20 < selections[element] < 200)
 
 
 class LibraryContentTest(MixedSplitTestCase):
