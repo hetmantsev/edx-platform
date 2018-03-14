@@ -282,26 +282,31 @@ class DjangoStorageReportStore(ReportStore):
         urls can be plugged straight into an href
         """
         course_dir = self.path_to(course_id)
+        prev_setting = self.storage.get('preload_metadata', None)
         try:
-            _, filenames = self.storage.listdir(course_dir)
-        except OSError:
-            # Django's FileSystemStorage fails with an OSError if the course
-            # dir does not exist; other storage types return an empty list.
-            return []
-        except BotoServerError as ex:
-            logger.error(
-                u'Fetching files failed for course: %s, status: %s, reason: %s',
-                course_id,
-                ex.status,
-                ex.reason
-            )
-            return []
-        files = [(filename, os.path.join(course_dir, filename)) for filename in filenames]
-        files.sort(key=lambda f: self.storage.modified_time(f[1]), reverse=True)
-        return [
-            (filename, self.storage.url(full_path))
-            for filename, full_path in files
-        ]
+          self.storage.preload_metadata = True
+          try:
+              _, filenames = self.storage.listdir(course_dir)
+          except OSError:
+              # Django's FileSystemStorage fails with an OSError if the course
+              # dir does not exist; other storage types return an empty list.
+              return []
+          except BotoServerError as ex:
+              logger.error(
+                  u'Fetching files failed for course: %s, status: %s, reason: %s',
+                  course_id,
+                  ex.status,
+                  ex.reason
+              )
+              return []
+          files = [(filename, os.path.join(course_dir, filename)) for filename in filenames]
+          files.sort(key=lambda f: self.storage.modified_time(f[1]), reverse=True)
+          return [
+              (filename, self.storage.url(full_path))
+              for filename, full_path in files
+          ]
+        finally:
+          self.storage.preload_metadata = prev_setting
 
     def path_to(self, course_id, filename=''):
         """
