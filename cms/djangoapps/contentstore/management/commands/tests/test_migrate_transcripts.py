@@ -187,13 +187,12 @@ class MigrateTranscripts(ModuleStoreTestCase):
             (LOGGER_NAME,
              'INFO',
              '[Transcript migration] process for video i4x://org.4/course_4/video/video_5 started'),
-            (LOGGER_NAME, 'INFO', 'video.sub is empty'),
             (LOGGER_NAME,
              'INFO',
-             u'Already pushed other transcript of language hr found: False '),
+             u'Already pushed transcript of language hr found: False '),
             (LOGGER_NAME,
              'INFO',
-             u'Already pushed other transcript of language ge found: False '),
+             u'Already pushed transcript of language ge found: False '),
             (LOGGER_NAME,
              'INFO',
              '[Transcript migration] process for video i4x://org.4/course_4/video/video_5 ended'),
@@ -202,9 +201,10 @@ class MigrateTranscripts(ModuleStoreTestCase):
              u'[Transcript migration] process for course org.4/course_4/Run_4 ended'),
             (LOGGER_NAME,
              'INFO',
-             'Migration result: Language hr transcript of video test_edx_video_id will be migrated\n'
-             'Language ge transcript of video test_edx_video_id will be migrated')
+             'Migration result: Language hr transcript of video test_edx_video_id will be migrated\nLanguage ge transcript of video test_edx_video_id will be migrated')
         )
+
+
 
         with LogCapture(LOGGER_NAME, level=logging.INFO) as logger:
             call_command('migrate_transcripts', unicode(self.course.id))

@@ -80,7 +80,7 @@ def enqueue_async_migrate_transcripts_tasks(
     kwargs = {
         'force_update': force_update,
         'commit': commit
-              }
+    }
     if all_courses:
         course_keys = [course.id for course in store.get_course_summaries()]
     else:
@@ -106,9 +106,8 @@ def task_status_callback(results):
 
 
 @task(base=PersistOnFailureTask)
-def async_migrate_transcript(*args, **kwargs):
+def async_migrate_transcript(course_key, **kwargs):
     try:
-        course_key = next(iter(args), None)
         if not modulestore().get_course(CourseKey.from_string(course_key)):
             raise KeyError(u'Invalid course key: ' + unicode(course_key))
         force_update = kwargs['force_update']
@@ -122,39 +121,26 @@ def async_migrate_transcript(*args, **kwargs):
             other_lang_transcripts = video.transcripts
             english_transcript = video.sub
             LOGGER.info("[Transcript migration] process for video %s started", video.location)
-
-            if english_transcript:
-                transcript_already_present = is_transcript_available(video.edx_video_id, 'en')
-                LOGGER.info("Already pushed english transcript found: %s ... ", transcript_already_present)
+            all_language_transcripts = dict({'en': video.sub}, **other_lang_transcripts) if english_transcript\
+                else other_lang_transcripts
+            for lang, name in all_language_transcripts.items():
+                transcript_already_present = is_transcript_available(video.edx_video_id, lang)
+                LOGGER.info("Already pushed transcript of language %s found: %s ",
+                            lang,
+                            transcript_already_present
+                            )
                 if transcript_already_present and force_update:
                     sub_tasks.append(async_migrate_transcript_subtask.s(
-                        video, 'en', video.sub, True, **kwargs
+                        video, lang, name, True, **kwargs
                     ))
                 elif not transcript_already_present:
                     sub_tasks.append(async_migrate_transcript_subtask.s(
-                        video, 'en', video.sub, False, **kwargs
+                        video, lang, name, False, **kwargs
                     ))
-            else:
-                LOGGER.info("video.sub is empty")
-            if any(other_lang_transcripts):
-                for lang, name in other_lang_transcripts.items():
-                    transcript_already_present = is_transcript_available(video.edx_video_id, lang)
-                    LOGGER.info("Already pushed other transcript of language %s found: %s ",
-                                lang,
-                                transcript_already_present
-                                )
-                    if transcript_already_present and force_update:
-                        sub_tasks.append(async_migrate_transcript_subtask.s(
-                            video, lang, name, True, **kwargs
-                        ))
-                    elif not transcript_already_present:
-                        sub_tasks.append(async_migrate_transcript_subtask.s(
-                            video, lang, name, False, **kwargs
-                        ))
             LOGGER.info("[Transcript migration] process for video %s ended", video.location)
-        LOGGER.info("[Transcript migration] process for course %s ended", course_key)
         callback = task_status_callback.s()
         status = chord(sub_tasks)(callback)
+        LOGGER.info("[Transcript migration] process for course %s ended", course_key)
         return status.get()
     except Exception as exc:
         LOGGER.exception('Exception: %r', text_type(exc))
@@ -181,10 +167,7 @@ def get_videos_from_store(course_key):
 @task(base=PersistOnFailureTask)
 def async_migrate_transcript_subtask(*args, **kwargs):
     try:
-        video = args[0]
-        language_code = args[1]
-        transcript_name = args[2]
-        force_update = args[3]
+        video, language_code, transcript_name, force_update = args
         commit = kwargs['commit']
         result = None
         if commit is not True:
@@ -193,6 +176,10 @@ def async_migrate_transcript_subtask(*args, **kwargs):
         try:
             transcript_content, transcript_name, Transcript_mime_type = get_transcript_from_contentstore(
                 video, language_code, Transcript.SJSON)
+
+            if not clean_video_id(video.edx_video_id):
+                video.edx_video_id = create_external_video('external-video')
+                video.save_with_metadata(user=User.objects.get(username='staff'))
             if video.edx_video_id:
                 result = push_to_s3(
                     video.edx_video_id,
@@ -201,18 +188,6 @@ def async_migrate_transcript_subtask(*args, **kwargs):
                     Transcript.SJSON,
                     force_update
                 )
-            else:
-                edx_video_id = create_external_video('external-video')
-                if edx_video_id:
-                    video.edx_video_id = edx_video_id
-                    video.save_with_metadata(user=User.objects.get(username='staff'))
-                    result = push_to_s3(
-                        video.edx_video_id,
-                        language_code,
-                        transcript_content,
-                        Transcript.SJSON,
-                        force_update
-                    )
         except NotFoundError:
                 LOGGER.error("Could not locate asset for %s language named %s of video %s ",
                              language_code, transcript_name, video.location)
