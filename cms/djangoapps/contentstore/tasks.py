@@ -52,12 +52,13 @@ from celery_utils.persist_on_failure import PersistOnFailureTask
 from xmodule.video_module.transcripts_utils import Transcript, clean_video_id, get_transcript_from_contentstore
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.exceptions import NotFoundError
-from edxval.api import create_video_transcript,\
-    is_transcript_available,\
-    create_or_update_video_transcript,\
-    create_external_video
+from edxval.api import (
+    create_video_transcript,
+    is_transcript_available,
+    create_or_update_video_transcript,
+    create_external_video,
+)
 from django.core.files.base import ContentFile
-from pysrt import SubRipFile
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -76,6 +77,16 @@ def enqueue_async_migrate_transcripts_tasks(
         force_update=False,
         commit=False
 ):
+    """
+            Fires new Celery tasks for all the input courses or for all courses.
+
+            Arguments:
+                course_ids: Command line course ids as list,
+                all_courses: Run the command for all courses. Default=False,
+                force_update: Overwrite file in S3. Default=False,
+                commit: Update S3 or dry-run the command to see which transcripts will be affected. Default=False
+     
+    """
     store = modulestore()
     kwargs = {
         'force_update': force_update,
@@ -102,11 +113,17 @@ def enqueue_async_migrate_transcripts_tasks(
 
 @task
 def task_status_callback(results):
+    """
+        Callback for collating the results of chord.
+    """
     return results
 
 
 @task(base=PersistOnFailureTask)
 def async_migrate_transcript(course_key, **kwargs):
+    """
+        Migrates the transcripts of all videos in a course as a new celery task.
+    """
     try:
         if not modulestore().get_course(CourseKey.from_string(course_key)):
             raise KeyError(u'Invalid course key: ' + unicode(course_key))
@@ -151,6 +168,9 @@ def async_migrate_transcript(course_key, **kwargs):
 
 
 def get_videos_from_store(course_key):
+    """
+            Function for retrieving all videos in a course.
+    """
     store = modulestore()
     all_videos = []
     for video in store.get_items(course_key, qualifiers={'category': 'video'},
@@ -166,6 +186,9 @@ def get_videos_from_store(course_key):
 
 @task(base=PersistOnFailureTask)
 def async_migrate_transcript_subtask(*args, **kwargs):
+    """
+         Migrates a transcript of a given video in a course as a new celery task.
+    """
     try:
         video, language_code, transcript_name, force_update = args
         commit = kwargs['commit']
@@ -215,6 +238,9 @@ def push_to_s3(
         file_format=Transcript.SJSON,
         force_update=False
 ):
+    """
+          Pushes a given transcript's data to S3.
+    """
     try:
         result = None
         LOGGER.info("File Format is %s!!!", file_format)
@@ -228,7 +254,6 @@ def push_to_s3(
             )
             LOGGER.info("Push_to_S3 %s for %s with create_or_update method",
                         True if result else False, edx_video_id)
-            return result
         else:
             result = create_video_transcript(
                 edx_video_id,
@@ -237,7 +262,7 @@ def push_to_s3(
                 ContentFile(transcript_content)
             )
             LOGGER.info("Push_to_S3 %s for %s with create method", result, edx_video_id)
-            return result
+        return result
     except Exception as err:
         LOGGER.error("Push_failed: %s", err)
         raise
