@@ -247,8 +247,8 @@ function($, Backbone, _, Utils, MetadataView, MetadataCollection) {
         },
 
         handleUpdateEdxVideoId: function(edxVideoId) {
-            edxVideoId = Utils.getField(this.collection, 'edx_video_id');
-            edxVideoId.setValue(edxVideoId);
+            var edxVideoIdField = Utils.getField(this.collection, 'edx_video_id');
+            edxVideoIdField.setValue(edxVideoId);
         }
 
     });

@@ -79,7 +79,6 @@ def validate_transcript_upload_data(request):
 
     Arguments:
         request: A WSGI request's data part.
-        files: A request's files part.
 
     Returns:
         Tuple containing an error and validated data
@@ -87,11 +86,12 @@ def validate_transcript_upload_data(request):
     """
     error, validated_data = None, {}
     data, files = request.POST, request.FILES
-    if not data.get('location'):
+    from pdb import set_trace; set_trace()
+    if not data.get('locator'):
         error = _(u'Video locator is required.')
     elif 'transcript-file' not in files:
         error = _(u'A transcript file is required.')
-    elif os.path.splitext(files['transcript-file'].name)[1:] != Transcript.SRT:
+    elif os.path.splitext(files['transcript-file'].name)[1][1:] != Transcript.SRT:
         error = _(u'This transcript file type is not supported.')
 
     if not error:
@@ -101,6 +101,7 @@ def validate_transcript_upload_data(request):
                 error = _(u'Transcripts are supported only for "video" module.')
             else:
                 validated_data.update({
+                    'video': item,
                     'edx_video_id': clean_video_id(item.edx_video_id),
                     'transcript_file': files['transcript-file']
                 })
@@ -124,11 +125,15 @@ def upload_transcripts(request):
     if error:
         response = JsonResponse({'status': error}, status=400)
     else:
+        video = validated_data['video']
         edx_video_id = validated_data['edx_video_id']
         transcript_file = validated_data['transcript_file']
-        # check if we need to create an external VAL video to associate the transcript.
+        # check if we need to create an external VAL video to associate the transcript
+        # and save its ID on the video component.
         if not edx_video_id:
             edx_video_id = create_external_video(display_name=u'external video')
+            video.edx_video_id = edx_video_id
+            video.save_with_metadata(request.user)
 
         try:
             # Convert 'srt' transcript into the 'sjson' and upload it to
@@ -148,7 +153,7 @@ def upload_transcripts(request):
                 },
                 file_data=ContentFile(sjson_subs),
             )
-            response = JsonResponse({'edx_video_id': edx_video_id}, status=201)
+            response = JsonResponse({'edx_video_id': edx_video_id}, status=200)
 
         except (TranscriptsGenerationException, UnicodeDecodeError):
 
