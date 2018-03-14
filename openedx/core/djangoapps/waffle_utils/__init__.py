@@ -44,6 +44,15 @@ To test WaffleSwitchNamespace, use the provided context managers.  For example:
     with WAFFLE_SWITCHES.override(waffle.ESTIMATE_FIRST_ATTEMPTED, active=True):
         ...
 
+For long-lived flags, you may want to change the default for the flag from "off"
+to "on", so that it is "on" by default in devstack, sandboxes, or a new Open edX
+release. WaffleFlag has a DEPRECATED argument flag_undefined_default that we
+don't recommend you use any more. Instead, you could use a migration so that the
+flag appears in the Django admin.
+NOTE: There is a idea to have a “waffle.py” inside each app that lists these
+“defaults” with a paper trail, preventing a large number of migrations, but this
+has not yet been implemented.
+
 """
 import crum
 import logging
@@ -230,8 +239,9 @@ class WaffleFlagNamespace(WaffleNamespace):
                 check_before_waffle_callback(namespaced_flag_name) returns True
                 or False, it is returned. If it returns None, then waffle is
                 used.
-            flag_undefined_default (Boolean): A default value to be returned if
-                the waffle flag is to be checked, but doesn't exist.
+            DEPRECATED flag_undefined_default (Boolean): A default value to be
+                returned if the waffle flag is to be checked, but doesn't exist.
+                See docs for alternatives.
         """
         # Import is placed here to avoid model import at project startup.
         from waffle.models import Flag
