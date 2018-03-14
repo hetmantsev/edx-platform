@@ -302,9 +302,7 @@ class VideoStudentViewHandlers(object):
                     For 'en' check if SJSON exists. For non-`en` check if SRT file exists.
         """
         is_bumper = request.GET.get('is_bumper', False)
-        # Currently, we don't handle video pre-load/bumper transcripts in edx-val.
-        feature_enabled = is_val_transcript_feature_enabled_for_course(self.course_id) and not is_bumper
-        transcripts = self.get_transcripts_info(is_bumper, include_val_transcripts=feature_enabled)
+        transcripts = self.get_transcripts_info(is_bumper)
 
         if dispatch.startswith('translation'):
             language = dispatch.replace('translation', '').strip('/')
@@ -345,7 +343,8 @@ class VideoStudentViewHandlers(object):
                 )
             except NotFoundError:
                 log.exception('[Translation Dispatch] %s', self.location)
-                return self.get_static_transcript(request, transcripts)
+                response = self.get_static_transcript(request, transcripts)
+
         elif dispatch == 'download':
             lang = request.GET.get('lang', None)
 
@@ -361,11 +360,11 @@ class VideoStudentViewHandlers(object):
                 mimetype
             )
         elif dispatch.startswith('available_translations'):
-
+            feature_enabled = is_val_transcript_feature_enabled_for_course(self.course_id) and not is_bumper
             available_translations = self.available_translations(
                 transcripts,
                 verify_assets=True,
-                include_val_transcripts=feature_enabled,
+                include_val_transcripts=feature_enabled
             )
             if available_translations:
                 response = Response(json.dumps(available_translations))

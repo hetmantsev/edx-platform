@@ -827,7 +827,7 @@ class VideoTranscriptsMixin(object):
             transcript_language = u'en'
         return transcript_language
 
-    def get_transcripts_info(self, is_bumper=False, include_val_transcripts=False):
+    def get_transcripts_info(self, is_bumper=False):
         """
         Returns a transcript dictionary for the video.
 
@@ -848,9 +848,8 @@ class VideoTranscriptsMixin(object):
             for language_code, transcript_file in transcripts.items() if transcript_file != ''
         }
 
-        # For phase 2, removing `include_val_transcripts` will make edx-val
-        # taking over the control for transcripts.
-        if include_val_transcripts:
+        # bumper transcripts are stored in content store
+        if not is_bumper:
             transcript_languages = get_available_transcript_languages(edx_video_id=self.edx_video_id)
             # HACK Warning! this is temporary and will be removed once edx-val take over the
             # transcript module and contentstore will only function as fallback until all the
@@ -987,7 +986,7 @@ def get_transcript(video, lang=None, output_format=Transcript.SRT, youtube_id=No
     Returns:
         tuple containing content, filename, mimetype
     """
-    transcripts_info = video.get_transcripts_info(include_val_transcripts=True)
+    transcripts_info = video.get_transcripts_info()
     if not lang:
         lang = video.get_default_transcript_language(transcripts_info)
 
