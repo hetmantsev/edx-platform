@@ -53,10 +53,11 @@ can't yet be deleted, for example if there are straggling course overrides.
     recommend you use any more. Although this can work, it is proven not ideal to
     have a value that isn't immediately obvious via Django admin.
 
-    * At this time, the proper alternative has not been fully designed. Ideas
-    proposed include using migrations, managing "defaults" in a waffle.py inside
-    each app, or using management commands. If this need arises, the design
-    should be completed and documented, rather than using the deprecated argument.
+    * At this time, the proper alternative has not been fully designed. The
+    following food-for-thought could provide ideas for this design when needed:
+    using migrations, using app-level configuration, using management commands,
+    and/or creating records up front so all toggle defaults are explicit rather
+    than implicit.
 
 """
 import crum
